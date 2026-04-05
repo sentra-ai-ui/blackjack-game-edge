@@ -39,14 +39,16 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       return +c.r;
     }
     function total(h) {
+      if (!h || h.length === 0) return 0;
       let t = 0, a = 0;
       for (const c of h) { t += val(c); if (c.r === 'A') a++; }
       while (t > 21 && a > 0) { t -= 10; a--; }
       return t;
     }
-    function bj(h) { return h.length === 2 && total(h) === 21; }
+    function bj(h) { return h && h.length === 2 && total(h) === 21; }
     function deal() {
       if (S.deck.length === 0) S.deck = shuffle(mkDeck());
+      if (S.deck.length === 0) return { s: 'spades', r: 'A' }; // fallback
       return S.deck.pop();
     }
     function canSplit(h) {
@@ -54,6 +56,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     }
     
     function handResult(h, dt, db) {
+      if (!h || h.length === 0) return { status: 'lose', result: 'lose', msg: 'No hand', display: '0' };
       const pt = total(h);
       const pb = bj(h);
       if (pt > 21) return { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
@@ -66,6 +69,23 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       return { status: 'push', result: 'push', msg: 'Push', display: pt.toString() };
     }
     
+    function safeAccess(arr, idx) {
+      return arr && idx >= 0 && idx < arr.length ? arr[idx] : null;
+    }
+    
+    function endRound() {
+      S.gameOver = true;
+      while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
+      const dt = total(S.dealerHand);
+      const db = bj(S.dealerHand);
+      for (const h of S.playerHands) {
+        const r = handResult(h, dt, db);
+        if (r.result === 'win')  S.sessionWins++;
+        if (r.result === 'lose') S.sessionLosses++;
+        if (r.result === 'push') S.sessionPushes++;
+      }
+    }
+    
     // === GAME LOGIC ===
     if (action === 'new_game') {
       S.deck = shuffle(mkDeck());
@@ -75,45 +95,39 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       S.activeHand = 0;
     } else if (action === 'hit') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      const h = S.playerHands[S.activeHand];
+      const h = safeAccess(S.playerHands, S.activeHand);
       if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       h.push(deal());
       const t = total(h);
       if (t > 21) {
-        // Bust - mark this hand as bust, move to next or end
         h._bust = true;
         if (S.activeHand < S.playerHands.length - 1) {
           S.activeHand++;
         } else {
-          // All hands done - dealer plays
-          S.gameOver = true;
-          while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
-          tallyRound();
+          endRound();
         }
       } else if (t === 21) {
-        // Auto-stand on 21
         h._stood = true;
         if (S.activeHand < S.playerHands.length - 1) {
           S.activeHand++;
         } else {
-          S.gameOver = true;
-          while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
-          tallyRound();
+          endRound();
         }
       }
     } else if (action === 'stand') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      S.playerHands[S.activeHand]._stood = true;
+      const h = safeAccess(S.playerHands, S.activeHand);
+      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
+      h._stood = true;
       if (S.activeHand < S.playerHands.length - 1) {
         S.activeHand++;
       } else {
-        S.gameOver = true;
-        while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
-        tallyRound();
+        endRound();
       }
     } else if (action === 'split') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      const h = S.playerHands[S.activeHand];
+      const h = safeAccess(S.playerHands, S.activeHand);
+      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       if (!canSplit(h)) return JSON.stringify({ error: 'Need two cards of same rank to split.' });
       if (S.playerHands.length >= 3) return JSON.stringify({ error: 'Max 3 hands allowed.' });
       const card1 = h[0], card2 = h[1];
@@ -121,17 +135,6 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       S.playerHands.splice(S.activeHand + 1, 0, [card2, deal()]);
     } else {
       return JSON.stringify({ error: 'Use: new_game, hit, stand, or split.' });
-    }
-    
-    function tallyRound() {
-      const dt = total(S.dealerHand);
-      const db = bj(S.dealerHand);
-      for (const h of S.playerHands) {
-        const r = handResult(h, dt, db);
-        if (r.result === 'win')  S.sessionWins++;
-        if (r.result === 'lose') S.sessionLosses++;
-        if (r.result === 'push') S.sessionPushes++;
-      }
     }
     
     // === BUILD RESPONSE ===
@@ -149,6 +152,8 @@ window['ai_edge_gallery_get_result'] = async (data) => {
         r = handResult(h, dt, db);
       } else if (h._bust) {
         r = { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
+      } else if (h._stood) {
+        r = { status: 'stood', result: 'pending', msg: 'Standing at ' + t, display: t.toString() };
       } else if (pb) {
         r = { status: 'bj', result: 'win', msg: 'Blackjack!', display: 'BJ' };
       } else {
@@ -174,7 +179,6 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     if (S.gameOver) {
       const wins = handsInfo.filter(h => h.status === 'win' || h.status === 'bj').length;
       const losses = handsInfo.filter(h => h.status === 'lose' || h.status === 'bust').length;
-      const pushes = handsInfo.filter(h => h.status === 'push').length;
       if (wins > 0 && losses === 0) { overallStatus = 'win'; overallMessage = 'You win!'; }
       else if (losses > 0 && wins === 0) { overallStatus = 'lose'; overallMessage = 'Dealer wins.'; }
       else if (wins > losses) { overallStatus = 'win'; overallMessage = 'You win!'; }
@@ -193,7 +197,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       gameOver: S.gameOver,
       status: overallStatus,
       message: overallMessage,
-      canSplit: canSplit(S.playerHands[S.activeHand]) && !S.gameOver && S.playerHands.length < 3,
+      canSplit: canSplit(safeAccess(S.playerHands, S.activeHand)) && !S.gameOver && S.playerHands.length < 3,
       nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".'
     };
     
