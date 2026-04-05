@@ -8,12 +8,10 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
     
-    // State stored on window - persists within the same session turn
     if (!window.bjState) {
       window.bjState = {
         deck: [], playerHands: [], dealerHand: [], gameOver: false,
-        activeHand: 0, sessionWins: 0, sessionLosses: 0, sessionPushes: 0,
-        actionLog: []  // Track actions for debugging
+        activeHand: 0, sessionWins: 0, sessionLosses: 0, sessionPushes: 0
       };
     }
     const S = window.bjState;
@@ -55,6 +53,19 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       return h && h.length === 2 && h[0].r === h[1].r;
     }
     
+    function handResult(h, dt, db) {
+      const pt = total(h);
+      const pb = bj(h);
+      if (pt > 21) return { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
+      if (pb && db)   return { status: 'bj',   result: 'push', msg: 'Both Blackjack', display: 'BJ' };
+      if (db)         return { status: 'lose', result: 'lose', msg: 'Dealer BJ', display: pt.toString() };
+      if (pb)         return { status: 'bj',   result: 'win',  msg: 'Blackjack!', display: 'BJ' };
+      if (dt > 21)    return { status: 'win',  result: 'win',  msg: 'Dealer busts', display: pt.toString() };
+      if (pt > dt)    return { status: 'win',  result: 'win',  msg: pt + ' beats ' + dt, display: pt.toString() };
+      if (dt > pt)    return { status: 'lose', result: 'lose', msg: dt + ' beats ' + pt, display: pt.toString() };
+      return { status: 'push', result: 'push', msg: 'Push', display: pt.toString() };
+    }
+    
     // === GAME LOGIC ===
     if (action === 'new_game') {
       S.deck = shuffle(mkDeck());
@@ -63,25 +74,25 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       S.gameOver = false;
       S.activeHand = 0;
     } else if (action === 'hit') {
-      if (S.gameOver) {
-        return JSON.stringify({ error: 'Game over. Say "new_game" to play again.' });
-      }
+      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
       const h = S.playerHands[S.activeHand];
-      if (!h) {
-        return JSON.stringify({ error: 'No active hand. Say "new_game".' });
-      }
+      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       h.push(deal());
       const t = total(h);
       if (t > 21) {
-        // Bust - move to next hand or end round
+        // Bust - mark this hand as bust, move to next or end
+        h._bust = true;
         if (S.activeHand < S.playerHands.length - 1) {
           S.activeHand++;
         } else {
+          // All hands done - dealer plays
           S.gameOver = true;
-          S.sessionLosses += S.playerHands.length;
+          while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
+          tallyRound();
         }
       } else if (t === 21) {
         // Auto-stand on 21
+        h._stood = true;
         if (S.activeHand < S.playerHands.length - 1) {
           S.activeHand++;
         } else {
@@ -91,9 +102,8 @@ window['ai_edge_gallery_get_result'] = async (data) => {
         }
       }
     } else if (action === 'stand') {
-      if (S.gameOver) {
-        return JSON.stringify({ error: 'Game over. Say "new_game" to play again.' });
-      }
+      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
+      S.playerHands[S.activeHand]._stood = true;
       if (S.activeHand < S.playerHands.length - 1) {
         S.activeHand++;
       } else {
@@ -102,73 +112,77 @@ window['ai_edge_gallery_get_result'] = async (data) => {
         tallyRound();
       }
     } else if (action === 'split') {
-      if (S.gameOver) {
-        return JSON.stringify({ error: 'Game over. Say "new_game" to play again.' });
-      }
+      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
       const h = S.playerHands[S.activeHand];
-      if (!canSplit(h)) {
-        return JSON.stringify({ error: 'Cannot split. Need two cards of the same rank.' });
-      }
-      if (S.playerHands.length >= 3) {
-        return JSON.stringify({ error: 'Max 3 hands allowed.' });
-      }
+      if (!canSplit(h)) return JSON.stringify({ error: 'Need two cards of same rank to split.' });
+      if (S.playerHands.length >= 3) return JSON.stringify({ error: 'Max 3 hands allowed.' });
       const card1 = h[0], card2 = h[1];
       S.playerHands[S.activeHand] = [card1, deal()];
       S.playerHands.splice(S.activeHand + 1, 0, [card2, deal()]);
     } else {
-      return JSON.stringify({ error: 'Unknown action. Use: new_game, hit, stand, or split.' });
+      return JSON.stringify({ error: 'Use: new_game, hit, stand, or split.' });
     }
     
     function tallyRound() {
       const dt = total(S.dealerHand);
       const db = bj(S.dealerHand);
       for (const h of S.playerHands) {
-        const pt = total(h);
-        const pb = bj(h);
-        if (pt > 21) {} // Already counted
-        else if (pb && db) S.sessionPushes++;
-        else if (db) S.sessionWins++;
-        else if (pb && !db) S.sessionWins++;
-        else if (dt > 21) S.sessionWins++;
-        else if (pt > dt) S.sessionWins++;
-        else if (dt > pt) S.sessionLosses++;
-        else S.sessionPushes++;
+        const r = handResult(h, dt, db);
+        if (r.result === 'win')  S.sessionWins++;
+        if (r.result === 'lose') S.sessionLosses++;
+        if (r.result === 'push') S.sessionPushes++;
       }
     }
     
     // === BUILD RESPONSE ===
     const hideDealer = !S.gameOver;
+    const dt = total(S.dealerHand);
+    const db = bj(S.dealerHand);
     
-    // Build hands info
     const handsInfo = S.playerHands.map((h, i) => {
-      const pt = total(h);
-      const pb = bj(h);
       const active = i === S.activeHand && !S.gameOver;
-      const bust = pt > 21;
+      const t = total(h);
+      const pb = bj(h);
+      
+      let r;
+      if (S.gameOver) {
+        r = handResult(h, dt, db);
+      } else if (h._bust) {
+        r = { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
+      } else if (pb) {
+        r = { status: 'bj', result: 'win', msg: 'Blackjack!', display: 'BJ' };
+      } else {
+        r = { status: 'playing', result: 'pending', msg: active ? "Your turn" : "Waiting", display: t.toString() };
+      }
+      
       return {
         index: i,
         cards: h.map(c => c.r + SYM[c.s]),
-        total: pb ? 'BJ' : (bust ? 'BUST' : pt),
-        status: bust ? 'bust' : pb ? 'bj' : active ? 'active' : 'waiting',
-        message: bust ? 'Bust!' : pb ? 'Blackjack!' : active ? "Your turn" : (S.gameOver ? (pt > total(S.dealerHand) || total(S.dealerHand) > 21 ? 'Wins' : pt < total(S.dealerHand) ? 'Loses' : 'Push') : 'Waiting')
+        total: r.display,
+        status: r.status,
+        message: r.msg,
+        active: active
       };
     });
     
-    const dealerTotal = hideDealer ? '?' : (bj(S.dealerHand) ? 'BJ' : total(S.dealerHand));
     const dealerCards = S.dealerHand.map((c, i) => (hideDealer && i > 0) ? '??' : c.r + SYM[c.s]);
+    const dealerTotal = hideDealer ? '?' : (db ? 'BJ' : dt.toString());
     
-    // Overall status
+    // Overall
     let overallStatus = 'playing';
     let overallMessage = '';
     if (S.gameOver) {
-      const wins = handsInfo.filter(h => h.status === 'bj' || (h.total !== 'BUST' && parseInt(h.total) > parseInt(dealerTotal))).length;
-      const losses = handsInfo.filter(h => h.total === 'BUST' || (h.status !== 'bj' && parseInt(h.total) < parseInt(dealerTotal))).length;
-      if (wins > losses) { overallStatus = 'win'; overallMessage = 'You win!'; }
+      const wins = handsInfo.filter(h => h.status === 'win' || h.status === 'bj').length;
+      const losses = handsInfo.filter(h => h.status === 'lose' || h.status === 'bust').length;
+      const pushes = handsInfo.filter(h => h.status === 'push').length;
+      if (wins > 0 && losses === 0) { overallStatus = 'win'; overallMessage = 'You win!'; }
+      else if (losses > 0 && wins === 0) { overallStatus = 'lose'; overallMessage = 'Dealer wins.'; }
+      else if (wins > losses) { overallStatus = 'win'; overallMessage = 'You win!'; }
       else if (losses > wins) { overallStatus = 'lose'; overallMessage = 'Dealer wins.'; }
       else { overallStatus = 'push'; overallMessage = 'Push!'; }
     } else {
-      overallMessage = handsInfo.length > 1 
-        ? 'Playing hand ' + (S.activeHand + 1) + ' of ' + handsInfo.length 
+      overallMessage = handsInfo.length > 1
+        ? 'Hand ' + (S.activeHand + 1) + ' of ' + handsInfo.length
         : 'Your turn';
     }
     
@@ -183,16 +197,16 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".'
     };
     
-    // Text fallback
+    // Text
     let text = '🃏 Blackjack\n';
     text += 'Session: ' + S.sessionWins + 'W / ' + S.sessionLosses + 'L / ' + S.sessionPushes + 'P\n\n';
     for (const h of handsInfo) {
       text += 'Hand ' + (h.index+1) + ': ' + h.cards.join(' ') + ' (' + h.total + ') - ' + h.message + '\n';
     }
     text += 'Dealer: ' + dealerCards.join(' ') + ' (' + dealerTotal + ')\n';
-    text += overallMessage + '\n';
-    if (responseData.canSplit) text += '\n💡 Tip: You can "split"!\n';
-    text += '\n' + responseData.nextHint;
+    text += overallMessage;
+    if (responseData.canSplit) text += '\n\n💡 Tip: You can "split"!';
+    text += '\n\n' + responseData.nextHint;
     
     return JSON.stringify({
       result: text,
