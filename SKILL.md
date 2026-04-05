@@ -1,6 +1,6 @@
 ---
 name: blackjack-game
-description: Play a classic game of Blackjack against the dealer in an interactive card game. Get dealt cards, decide to hit or stand, and try to beat the dealer without going over 21.
+description: Play a classic game of Blackjack against the dealer. Uses "new_game", "hit", or "stand" as actions to play.
 metadata:
   homepage: https://github.com/sentra-ai-ui/blackjack-game-edge
 ---
@@ -11,7 +11,7 @@ metadata:
 
 Call the `run_js` tool with the following exact parameters:
 - script name: index.html
-- data: A JSON string with the following fields:
+- data: A JSON string with the following field:
   - action: String. Use "new_game" to start a fresh game, "hit" to draw another card, or "stand" to let the dealer play.
 
 ## Game Rules
@@ -33,20 +33,16 @@ Call the `run_js` tool with the following exact parameters:
 
 ## Output
 
-The skill returns a JSON object with:
-- result: String describing the current game state and outcome
-- gameState: Object containing:
-  - playerCards: Array of card objects {suit, rank, display}
-  - dealerCards: Array of card objects (hidden card shown as "??" until round ends)
-  - playerTotal: Number (or "blackjack")
-  - dealerTotal: Number (or "blackjack", "?" if hidden)
-  - status: String (playing/bust/blackjack/dealer_bust/win/lose/push)
-  - message: String describing what happened
-- webview: An interactive HTML view showing the current cards and action buttons
+The skill returns a JSON object with a `result` field containing a rendered HTML representation of the game state showing:
+- Dealer's hand with one card hidden until round ends
+- Player's full hand
+- Hand totals
+- Game status message
+- Instructions for next action
 
 ## Tips
 
 - Start with "new_game" to begin
-- "Hit" to get more cards, but be careful not to bust (go over 21)
-- "Stand" when you're satisfied with your hand
+- Say "hit" to get more cards, but be careful not to bust (go over 21)
+- Say "stand" when you're satisfied with your hand
 - Watch the dealer's visible card to make strategic decisions
