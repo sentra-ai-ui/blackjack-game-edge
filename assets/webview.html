@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Blackjack</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d4f1c; color: white; min-height: 100vh; padding: 15px; }
+    .card-table { background: linear-gradient(135deg, #1a5c2e 0%, #0d4f1c 100%); border-radius: 15px; padding: 20px; max-width: 500px; margin: 0 auto; box-shadow: 0 15px 40px rgba(0,0,0,0.5); }
+    h1 { text-align: center; margin-bottom: 15px; font-size: 22px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+    h2 { margin-bottom: 10px; font-size: 14px; color: #ffd700; text-transform: uppercase; letter-spacing: 1px; }
+    .hand { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px; justify-content: center; min-height: 90px; }
+    .card { width: 55px; height: 80px; background: white; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; box-shadow: 0 3px 10px rgba(0,0,0,0.3); position: relative; }
+    .card.red { color: #c41e3a; }
+    .card.black { color: #1a1a1a; }
+    .card .rank { line-height: 1; }
+    .card .suit { font-size: 14px; margin-top: 2px; }
+    .card.hidden { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); border: 2px solid #3a6ea5; }
+    .card.hidden::before { content: '?'; font-size: 24px; color: #ffd700; }
+    .card.hidden .rank, .card.hidden .suit { display: none; }
+    .total { font-size: 16px; margin-bottom: 15px; text-align: center; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 8px; }
+    .total span { color: #ffd700; font-weight: bold; }
+    .buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 15px; }
+    button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; font-weight: bold; text-transform: uppercase; flex: 1; min-width: 100px; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+    button:active { transform: translateY(0); }
+    .btn-hit { background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); color: white; }
+    .btn-stand { background: linear-gradient(135deg, #f44336 0%, #c62828 100%); color: white; }
+    .btn-new { background: linear-gradient(135deg, #2196F3 0%, #1565C0 100%); color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .message { text-align: center; font-size: 16px; margin: 15px 0; padding: 12px; border-radius: 8px; font-weight: bold; }
+    .message.win { background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); }
+    .message.lose { background: linear-gradient(135deg, #f44336 0%, #c62828 100%); }
+    .message.push { background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); }
+    .message.bust { background: linear-gradient(135deg, #9c27b0 0%, #6a1b9a 100%); }
+    .message.blackjack { background: linear-gradient(135deg, #ffd700 0%, #ffA500 100%); color: #1a1a1a; }
+    .instructions { font-size: 11px; color: #aaa; text-align: center; margin-top: 15px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="card-table">
+    <h1>🃏 Blackjack</h1>
+    
+    <h2>Dealer</h2>
+    <div id="dealer-hand" class="hand"></div>
+    <div id="dealer-total" class="total">Total: <span>?</span></div>
+    
+    <h2>Your Hand</h2>
+    <div id="player-hand" class="hand"></div>
+    <div id="player-total" class="total">Total: <span>0</span></div>
+    
+    <div id="message" class="message" style="display: none;"></div>
+    
+    <div class="buttons">
+      <button id="btn-new" class="btn-new" onclick="newGame()">New Game</button>
+      <button id="btn-hit" class="btn-hit" onclick="hit()" disabled>Hit</button>
+      <button id="btn-stand" class="btn-stand" onclick="stand()" disabled>Stand</button>
+    </div>
+    
+    <p class="instructions">Get closer to 21 than the dealer without going over. Aces = 1 or 11. Face cards = 10.</p>
+  </div>
+
+  <script>
+    // State from backend
+    let gameState = null;
+    
+    const SUIT_SYMBOLS = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+    
+    function renderCard(card, hidden = false) {
+      if (hidden) {
+        return `<div class="card hidden"><span class="rank">?</span></div>`;
+      }
+      const color = ['hearts', 'diamonds'].includes(card.suit) ? 'red' : 'black';
+      return `<div class="card ${color}">
+        <span class="rank">${card.rank}</span>
+        <span class="suit">${SUIT_SYMBOLS[card.suit]}</span>
+      </div>`;
+    }
+    
+    function renderHand(cards, hideSecond = false) {
+      if (!cards || cards.length === 0) return '';
+      if (hideSecond && cards.length > 1) {
+        let html = renderCard(cards[0]);
+        for (let i = 1; i < cards.length; i++) {
+          html += renderCard(cards[i], true);
+        }
+        return html;
+      }
+      return cards.map(card => renderCard(card)).join('');
+    }
+    
+    function updateUI(state) {
+      if (!state) return;
+      
+      const playerCards = state.playerCards || [];
+      const dealerCards = state.dealerCards || [];
+      const hideDealer = state.status === 'playing';
+      
+      document.getElementById('player-hand').innerHTML = renderHand(playerCards);
+      document.getElementById('player-total').innerHTML = `Total: <span>${state.playerTotal || 0}</span>`;
+      
+      if (hideDealer && dealerCards.length > 1) {
+        document.getElementById('dealer-hand').innerHTML = renderHand(dealerCards, true);
+        document.getElementById('dealer-total').innerHTML = `Total: <span>?</span>`;
+      } else {
+        document.getElementById('dealer-hand').innerHTML = renderHand(dealerCards);
+        document.getElementById('dealer-total').innerHTML = `Total: <span>${state.dealerTotal || '?'}</span>`;
+      }
+      
+      const msgEl = document.getElementById('message');
+      if (state.status !== 'playing') {
+        const messages = {
+          bust: 'Bust! You went over 21.',
+          blackjack: 'Blackjack! You win!',
+          dealer_bust: 'Dealer busts! You win!',
+          win: 'You win!',
+          lose: 'Dealer wins.',
+          push: 'Push - it\'s a tie!'
+        };
+        msgEl.textContent = messages[state.status] || '';
+        msgEl.className = 'message ' + (state.status === 'win' || state.status === 'blackjack' || state.status === 'dealer_bust' ? 'win' : state.status === 'lose' ? 'lose' : state.status === 'push' ? 'push' : state.status === 'bust' ? 'bust' : '');
+        msgEl.style.display = 'block';
+      } else {
+        msgEl.style.display = 'none';
+      }
+      
+      const isPlaying = state.status === 'playing';
+      document.getElementById('btn-new').disabled = isPlaying;
+      document.getElementById('btn-hit').disabled = !isPlaying;
+      document.getElementById('btn-stand').disabled = !isPlaying;
+    }
+    
+    function newGame() {
+      if (window.ai_edge_gallery && window.ai_edge_gallery.performAction) {
+        window.ai_edge_gallery.performAction('new_game');
+      } else {
+        // Fallback for testing
+        updateUI({ playerCards: [], dealerCards: [], playerTotal: 0, dealerTotal: '?', status: 'playing' });
+      }
+    }
+    
+    function hit() {
+      if (window.ai_edge_gallery && window.ai_edge_gallery.performAction) {
+        window.ai_edge_gallery.performAction('hit');
+      }
+    }
+    
+    function stand() {
+      if (window.ai_edge_gallery && window.ai_edge_gallery.performAction) {
+        window.ai_edge_gallery.performAction('stand');
+      }
+    }
+    
+    // Listen for state updates from the app
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'gameState') {
+        gameState = e.data.state;
+        updateUI(gameState);
+      }
+    });
+    
+    // Initial state
+    updateUI({ playerCards: [], dealerCards: [], playerTotal: 0, dealerTotal: '?', status: 'playing' });
+  </script>
+</body>
+</html>

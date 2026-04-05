@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blackjack Game</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d4f1c; color: white; min-height: 100vh; padding: 20px; }
+    .card-table { background: linear-gradient(135deg, #1a5c2e 0%, #0d4f1c 100%); border-radius: 20px; padding: 30px; max-width: 600px; margin: 0 auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+    h1 { text-align: center; margin-bottom: 20px; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+    h2 { margin-bottom: 15px; font-size: 18px; color: #ffd700; }
+    .hand { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 25px; justify-content: center; }
+    .card { width: 70px; height: 100px; background: white; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); position: relative; }
+    .card.red { color: #c41e3a; }
+    .card.black { color: #1a1a1a; }
+    .card.hearts::before, .card.diamonds::before { content: attr(data-suit); position: absolute; top: 5px; font-size: 14px; }
+    .card.hearts::after, .card.diamonds::after { content: attr(data-suit); position: absolute; bottom: 5px; font-size: 14px; transform: rotate(180deg); }
+    .card.spades::before, .card.clubs::before { content: attr(data-suit); position: absolute; top: 5px; font-size: 14px; }
+    .card.spades::after, .card.clubs::after { content: attr(data-suit); position: absolute; bottom: 5px; font-size: 14px; transform: rotate(180deg); }
+    .card.hidden { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); border: 3px solid #3a6ea5; }
+    .card.hidden::before { content: '?'; font-size: 30px; color: #ffd700; }
+    .card .rank { line-height: 1; }
+    .card .suit { font-size: 20px; margin-top: 2px; }
+    .total { font-size: 20px; margin-bottom: 20px; text-align: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 10px; }
+    .total span { color: #ffd700; font-weight: bold; }
+    .buttons { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+    button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s; font-weight: bold; text-transform: uppercase; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0,0,0,0.3); }
+    button:active { transform: translateY(0); }
+    .btn-hit { background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); color: white; }
+    .btn-stand { background: linear-gradient(135deg, #f44336 0%, #c62828 100%); color: white; }
+    .btn-new { background: linear-gradient(135deg, #2196F3 0%, #1565C0 100%); color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .message { text-align: center; font-size: 22px; margin: 20px 0; padding: 15px; border-radius: 10px; font-weight: bold; }
+    .message.win { background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); }
+    .message.lose { background: linear-gradient(135deg, #f44336 0%, #c62828 100%); }
+    .message.push { background: linear-gradient(135deg: #ff9800 0%, #f57c00 100%); }
+    .message.bust { background: linear-gradient(135deg: #9c27b0 0%, #6a1b9a 100%); }
+    .message.blackjack { background: linear-gradient(135deg: #ffd700 0%, #ffA500 100%); color: #1a1a1a; }
+    .instructions { font-size: 12px; color: #aaa; text-align: center; margin-top: 20px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card-table">
+    <h1>🃏 Blackjack</h1>
+    <h2>Dealer's Hand</h2>
+    <div id="dealer-hand" class="hand"></div>
+    <div id="dealer-total" class="total">Total: <span>?</span></div>
+    
+    <h2>Your Hand</h2>
+    <div id="player-hand" class="hand"></div>
+    <div id="player-total" class="total">Total: <span>0</span></div>
+    
+    <div id="message" class="message" style="display: none;"></div>
+    
+    <div class="buttons">
+      <button id="btn-new" class="btn-new" onclick="newGame()">New Game</button>
+      <button id="btn-hit" class="btn-hit" onclick="hit()" disabled>Hit</button>
+      <button id="btn-stand" class="btn-stand" onclick="stand()" disabled>Stand</button>
+    </div>
+    
+    <p class="instructions">Get closer to 21 than the dealer without going over. Aces count as 1 or 11. Face cards count as 10.</p>
+  </div>
+
+  <script>
+    const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
+    const SUIT_SYMBOLS = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+    const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    
+    let deck = [];
+    let playerHand = [];
+    let dealerHand = [];
+    let gameOver = false;
+
+    function createDeck() {
+      const newDeck = [];
+      for (const suit of SUITS) {
+        for (const rank of RANKS) {
+          newDeck.push({ suit, rank });
+        }
+      }
+      return shuffle(newDeck);
+    }
+
+    function shuffle(array) {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function getCardValue(card) {
+      if (['J', 'Q', 'K'].includes(card.rank)) return 10;
+      if (card.rank === 'A') return 11;
+      return parseInt(card.rank);
+    }
+
+    function calculateTotal(hand) {
+      let total = 0;
+      let aces = 0;
+      for (const card of hand) {
+        total += getCardValue(card);
+        if (card.rank === 'A') aces++;
+      }
+      while (total > 21 && aces > 0) {
+        total -= 10;
+        aces--;
+      }
+      return total;
+    }
+
+    function isBlackjack(hand) {
+      return hand.length === 2 && calculateTotal(hand) === 21;
+    }
+
+    function getCardDisplay(card) {
+      return `${SUIT_SYMBOLS[card.suit]}${card.rank}`;
+    }
+
+    function renderCard(card, hidden = false) {
+      if (hidden) {
+        return `<div class="card hidden"><span class="rank">?</span></div>`;
+      }
+      const color = ['hearts', 'diamonds'].includes(card.suit) ? 'red' : 'black';
+      return `<div class="card ${color} ${card.suit}" data-suit="${SUIT_SYMBOLS[card.suit]}">
+        <span class="rank">${card.rank}</span>
+        <span class="suit">${SUIT_SYMBOLS[card.suit]}</span>
+      </div>`;
+    }
+
+    function renderHand(hand, hideSecond = false) {
+      if (hideSecond && hand.length > 1) {
+        let html = renderCard(hand[0]);
+        for (let i = 1; i < hand.length; i++) {
+          html += renderCard(hand[i], true);
+        }
+        return html;
+      }
+      return hand.map(card => renderCard(card)).join('');
+    }
+
+    function updateUI(playerTotal, dealerTotal, hideDealer = true) {
+      document.getElementById('player-hand').innerHTML = renderHand(playerHand);
+      document.getElementById('player-total').innerHTML = `Total: <span>${playerTotal === 21 && playerHand.length === 2 ? 'BLACKJACK!' : playerTotal}</span>`;
+      
+      if (hideDealer && !gameOver) {
+        document.getElementById('dealer-hand').innerHTML = renderHand(dealerHand, true);
+        document.getElementById('dealer-total').innerHTML = `Total: <span>?</span>`;
+      } else {
+        document.getElementById('dealer-hand').innerHTML = renderHand(dealerHand);
+        document.getElementById('dealer-total').innerHTML = `Total: <span>${dealerTotal === 21 && dealerHand.length === 2 ? 'BLACKJACK!' : dealerTotal}</span>`;
+      }
+    }
+
+    function showMessage(text, type = '') {
+      const msgEl = document.getElementById('message');
+      msgEl.textContent = text;
+      msgEl.className = 'message ' + type;
+      msgEl.style.display = 'block';
+    }
+
+    function setButtons(newEnabled, hitEnabled, standEnabled) {
+      document.getElementById('btn-new').disabled = !newEnabled;
+      document.getElementById('btn-hit').disabled = !hitEnabled;
+      document.getElementById('btn-stand').disabled = !standEnabled;
+    }
+
+    function dealCard() {
+      if (deck.length === 0) deck = createDeck();
+      return deck.pop();
+    }
+
+    function newGame() {
+      deck = createDeck();
+      playerHand = [dealCard(), dealCard()];
+      dealerHand = [dealCard(), dealCard()];
+      gameOver = false;
+      document.getElementById('message').style.display = 'none';
+      
+      const playerTotal = calculateTotal(playerHand);
+      const dealerTotal = calculateTotal(dealerHand);
+      
+      updateUI(playerTotal, dealerTotal, true);
+      
+      if (isBlackjack(playerHand)) {
+        gameOver = true;
+        updateUI(playerTotal, dealerTotal, false);
+        if (isBlackjack(dealerHand)) {
+          showMessage("Both have Blackjack! It's a push!", 'push');
+        } else {
+          showMessage("Blackjack! You win 3:2!", 'blackjack');
+        }
+        setButtons(true, false, false);
+      } else {
+        setButtons(true, true, true);
+      }
+      
+      return getGameState();
+    }
+
+    function hit() {
+      if (gameOver) return;
+      
+      playerHand.push(dealCard());
+      const playerTotal = calculateTotal(playerHand);
+      
+      updateUI(playerTotal, calculateTotal([dealerHand[0]]), true);
+      
+      if (playerTotal > 21) {
+        gameOver = true;
+        showMessage(`Bust! You went over 21.`, 'bust');
+        setButtons(true, false, false);
+        updateUI(playerTotal, calculateTotal(dealerHand), false);
+      } else if (playerTotal === 21) {
+        stand();
+        return;
+      }
+      
+      return getGameState();
+    }
+
+    function stand() {
+      if (gameOver) return;
+      gameOver = true;
+      
+      let dealerTotal = calculateTotal(dealerHand);
+      
+      // Dealer draws until 17+
+      while (dealerTotal < 17) {
+        dealerHand.push(dealCard());
+        dealerTotal = calculateTotal(dealerHand);
+      }
+      
+      const playerTotal = calculateTotal(playerHand);
+      
+      updateUI(playerTotal, dealerTotal, false);
+      
+      let message, type;
+      if (dealerTotal > 21) {
+        message = `Dealer busts with ${dealerTotal}! You win!`;
+        type = 'win';
+      } else if (dealerTotal > playerTotal) {
+        message = `Dealer wins ${dealerTotal} to ${playerTotal}.`;
+        type = 'lose';
+      } else if (playerTotal > dealerTotal) {
+        message = `You win ${playerTotal} to ${dealerTotal}!`;
+        type = 'win';
+      } else {
+        message = `Push! Both have ${playerTotal}.`;
+        type = 'push';
+      }
+      
+      showMessage(message, type);
+      setButtons(true, false, false);
+      
+      return getGameState();
+    }
+
+    function getGameState() {
+      const playerTotal = calculateTotal(playerHand);
+      const dealerTotal = calculateTotal(dealerHand);
+      
+      let status = 'playing';
+      if (gameOver) {
+        if (playerTotal > 21) status = 'bust';
+        else if (isBlackjack(playerHand)) status = 'blackjack';
+        else if (dealerTotal > 21) status = 'dealer_bust';
+        else if (playerTotal > dealerTotal) status = 'win';
+        else if (dealerTotal > playerTotal) status = 'lose';
+        else status = 'push';
+      }
+      
+      return {
+        playerCards: playerHand.map(c => ({ suit: c.suit, rank: c.rank, display: getCardDisplay(c) })),
+        dealerCards: dealerHand.map(c => ({ suit: c.suit, rank: c.rank, display: getCardDisplay(c) })),
+        playerTotal: isBlackjack(playerHand) ? 'blackjack' : playerTotal,
+        dealerTotal: gameOver || !gameOver ? (isBlackjack(dealerHand) ? 'blackjack' : dealerTotal) : '?',
+        status: status,
+        action: gameOver ? 'new_game' : 'hit_or_stand'
+      };
+    }
+
+    // Export for Edge Gallery
+    window['ai_edge_gallery_get_result'] = async (data) => {
+      try {
+        const jsonData = JSON.parse(data);
+        let result;
+        
+        switch (jsonData.action) {
+          case 'new_game':
+            result = newGame();
+            break;
+          case 'hit':
+            result = hit();
+            if (!result) result = { error: 'No game in progress' };
+            break;
+          case 'stand':
+            result = stand();
+            if (!result) result = { error: 'No game in progress' };
+            break;
+          default:
+            return JSON.stringify({ error: 'Invalid action. Use new_game, hit, or stand.' });
+        }
+        
+        return JSON.stringify({
+          result: JSON.stringify(result),
+          webview: {
+            url: 'webview.html',
+            aspectRatio: 1.4
+          }
+        });
+      } catch (e) {
+        return JSON.stringify({ error: `Failed: ${e.message}` });
+      }
+    };
+  </script>
+</body>
+</html>
