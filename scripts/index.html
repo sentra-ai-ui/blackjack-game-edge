@@ -8,9 +8,12 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
     
-    // Game state persists via window module scope
     if (!window.bjState) {
-      window.bjState = { deck: [], playerHand: [], dealerHand: [], gameOver: false };
+      window.bjState = {
+        deck: [], playerHands: [], dealerHand: [], gameOver: false,
+        activeHand: 0, splitAvailable: false,
+        wins: 0, losses: 0, pushes: 0
+      };
     }
     const S = window.bjState;
     
@@ -46,57 +49,136 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       if (S.deck.length === 0) S.deck = shuffle(mkDeck());
       return S.deck.pop();
     }
-    function state() {
-      const pt = total(S.playerHand);
-      const dt = total(S.dealerHand);
-      const pb = bj(S.playerHand);
-      const db = bj(S.dealerHand);
+    function canSplit(hand) {
+      return hand.length === 2 && hand[0].r === hand[1].r;
+    }
+    function getState() {
       const hide = !S.gameOver;
+      const results = [];
+      let overallSt = 'playing';
+      let overallMsg = '';
       
-      let st = 'playing', msg = '';
       if (S.gameOver) {
-        if (pt > 21)      { st = 'bust';       msg = 'Bust! You went over 21.'; }
-        else if (pb && db){ st = 'push';       msg = 'Both have Blackjack - Push!'; }
-        else if (pb)      { st = 'blackjack';   msg = 'Blackjack! You win 3:2!'; }
-        else if (db)      { st = 'lose';        msg = 'Dealer has Blackjack!'; }
-        else if (dt > 21) { st = 'dealer_bust'; msg = 'Dealer busts! You win!'; }
-        else if (pt > dt) { st = 'win';         msg = 'You win ' + pt + ' to ' + dt + '!'; }
-        else if (dt > pt) { st = 'lose';        msg = 'Dealer wins ' + dt + ' to ' + pt + '.'; }
-        else              { st = 'push';        msg = 'Push! Both have ' + pt + '.'; }
+        const dealerT = total(S.dealerHand);
+        for (let i = 0; i < S.playerHands.length; i++) {
+          const h = S.playerHands[i];
+          const pt = total(h);
+          const ph = bj(h);
+          let st = '', msg = '';
+          if (pt > 21)      { st = 'lose'; msg = 'Hand ' + (i+1) + ' busts'; }
+          else if (ph && bj(S.dealerHand)) { st = 'push'; msg = 'Both Blackjack'; }
+          else if (bj(S.dealerHand))       { st = 'lose'; msg = 'Dealer Blackjack'; }
+          else if (dealerT > 21)           { st = 'win';  msg = 'Dealer busts!'; }
+          else if (pt > dealerT)           { st = 'win';  msg = pt + ' beats ' + dealerT; }
+          else if (dealerT > pt)           { st = 'lose'; msg = dealerT + ' beats ' + pt; }
+          else                              { st = 'push'; msg = 'Push'; }
+          results.push({ pc: h.map(c => c.r + SYM[c.s]), pt: ph ? 'BJ' : pt, st, msg, active: false });
+        }
+        // Determine overall
+        const wins = results.filter(r => r.st === 'win').length;
+        const losses = results.filter(r => r.st === 'lose').length;
+        const pushes = results.filter(r => r.st === 'push').length;
+        if (wins > losses)      { overallSt = 'win'; overallMsg = 'You won ' + wins + ', lost ' + losses; }
+        else if (losses > wins) { overallSt = 'lose'; overallMsg = 'You lost ' + losses + ', won ' + wins; }
+        else                    { overallSt = 'push'; overallMsg = 'Split push: ' + pushes; }
+      } else {
+        // Show each hand
+        for (let i = 0; i < S.playerHands.length; i++) {
+          const h = S.playerHands[i];
+          const pt = total(h);
+          const ph = bj(h);
+          const active = i === S.activeHand;
+          results.push({
+            pc: h.map(c => c.r + SYM[c.s]),
+            pt: ph ? 'BJ' : pt,
+            st: ph ? 'bj' : 'playing',
+            msg: active ? 'Your turn' : 'Waiting',
+            active
+          });
+        }
+        overallMsg = S.playerHands.length > 1 ? 'Playing ' + (S.activeHand+1) + ' of ' + S.playerHands.length : 'Your turn';
       }
+      
       return {
-        pc: S.playerHand.map(c => c.r + SYM[c.s]),
+        hands: results,
         dc: S.dealerHand.map((c, i) => (hide && i > 0) ? '??' : c.r + SYM[c.s]),
-        pt: pb ? 'BJ' : pt,
-        dt: hide ? '?' : (db ? 'BJ' : dt),
-        st, msg,
-        next: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit" or "stand".'
+        dt: hide ? '?' : (bj(S.dealerHand) ? 'BJ' : total(S.dealerHand)),
+        st: overallSt,
+        msg: overallMsg,
+        wins: S.wins, losses: S.losses, pushes: S.pushes,
+        next: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split" (if available).',
+        split: canSplit(S.playerHands[S.activeHand] || [])
       };
     }
     
     if (action === 'new_game') {
       S.deck = shuffle(mkDeck());
-      S.playerHand = [deal(), deal()];
+      S.playerHands = [[deal(), deal()]];
       S.dealerHand = [deal(), deal()];
       S.gameOver = false;
+      S.activeHand = 0;
+      // Update stats from last round if existed
+      // (stats updated on stand)
     } else if (action === 'hit') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      S.playerHand.push(deal());
-      if (total(S.playerHand) > 21) S.gameOver = true;
+      const h = S.playerHands[S.activeHand];
+      h.push(deal());
+      if (total(h) > 21) {
+        // Move to next hand or end
+        if (S.activeHand < S.playerHands.length - 1) {
+          S.activeHand++;
+        } else {
+          // All hands bust - dealer doesn't play
+          S.gameOver = true;
+          // Count as loss
+          S.losses += S.playerHands.length;
+        }
+      }
     } else if (action === 'stand') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      S.gameOver = true;
-      while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
+      if (S.activeHand < S.playerHands.length - 1) {
+        S.activeHand++;
+      } else {
+        // All hands decided - dealer plays
+        S.gameOver = true;
+        while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
+        // Tally results
+        const dealerT = total(S.dealerHand);
+        for (const h of S.playerHands) {
+          const pt = total(h);
+          if (pt > 21) {} // already counted on bust
+          else if (bj(h) && bj(S.dealerHand)) S.pushes++;
+          else if (bj(S.dealerHand)) S.losses++;
+          else if (dealerT > 21) S.wins++;
+          else if (pt > dealerT) S.wins++;
+          else if (dealerT > pt) S.losses++;
+          else S.pushes++;
+        }
+      }
+    } else if (action === 'split') {
+      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
+      const h = S.playerHands[S.activeHand];
+      if (!canSplit(h)) return JSON.stringify({ error: 'Cannot split. Need two cards of same rank.' });
+      const card1 = h[0], card2 = h[1];
+      S.playerHands[S.activeHand] = [card1, deal()];
+      S.playerHands.splice(S.activeHand + 1, 0, [card2, deal()]);
     } else {
-      return JSON.stringify({ error: 'Use new_game, hit, or stand.' });
+      return JSON.stringify({ error: 'Use new_game, hit, stand, or split.' });
     }
     
-    const st = state();
-    
-    // Pass full state via URL param to webview.html
+    const st = getState();
     const encoded = encodeURIComponent(JSON.stringify(st));
+    
+    // Text fallback
+    let text = '🃏 Blackjack\nSession: ' + st.wins + 'W / ' + st.losses + 'L / ' + st.pushes + 'P\n\n';
+    for (let i = 0; i < st.hands.length; i++) {
+      const h = st.hands[i];
+      text += 'Hand ' + (i+1) + ': ' + h.pc.join(' ') + ' (' + h.pt + ') - ' + h.msg + '\n';
+    }
+    text += 'Dealer: ' + st.dc.join(' ') + ' (' + st.dt + ')\n' + st.msg + '\n' + st.next;
+    
     return JSON.stringify({
-      result: '🃏 Blackjack\n\nDealer: ' + st.dc.join(' ') + ' (' + st.dt + ')\nYou: ' + st.pc.join(' ') + ' (' + st.pt + ')\n\n' + st.msg + '\n\n' + st.next,
+      result: text,
       webview: { url: 'webview.html?state=' + encoded, aspectRatio: 1.5 }
     });
     
