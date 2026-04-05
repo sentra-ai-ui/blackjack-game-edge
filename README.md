@@ -5,7 +5,8 @@ An interactive Blackjack card game skill for the [AI Edge Gallery](https://ai.go
 ## Features
 
 - Play classic Blackjack against the dealer
-- Beautiful card table UI with smooth animations
+- Visual card table rendered in the chat via webview
+- Text fallback also shown in chat
 - Automatic ace optimization (1 or 11)
 - Blackjack detection (3:2 payout)
 - Dealer AI follows standard casino rules
@@ -18,16 +19,11 @@ An interactive Blackjack card game skill for the [AI Edge Gallery](https://ai.go
 4. Tap the (+) button and select "Load skill from URL"
 5. Enter: `https://sentra-ai-ui.github.io/blackjack-game-edge`
 
-Or import locally:
-1. Push this folder to your Android device's Download folder
-2. In AI Edge Gallery, tap (+) → "Import local skill"
-3. Select this directory
-
 ## How to Play
 
-- **New Game**: Start a fresh round
-- **Hit**: Draw another card
-- **Stand**: Keep your hand and let the dealer play
+- **new_game**: Start a fresh round
+- **hit**: Draw another card
+- **stand**: Keep your hand and let the dealer play
 
 ## Rules
 
@@ -40,8 +36,8 @@ Or import locally:
 
 This skill uses:
 - `SKILL.md` - Skill metadata and instructions
-- `scripts/index.html` - Game logic (hidden webview)
-- `assets/webview.html` - Interactive UI rendered in chat
+- `scripts/index.html` - Game logic, state management, passes state to webview
+- `assets/webview.html` - Visual card table rendered in chat
 
 ## License
 
