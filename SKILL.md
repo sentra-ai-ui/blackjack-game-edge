@@ -2,7 +2,7 @@
 name: blackjack-game
 description: Play a classic game of Blackjack against the dealer in an interactive card game. Get dealt cards, decide to hit or stand, and try to beat the dealer without going over 21.
 metadata:
-  homepage: https://github.com/YOUR_GITHUB/blackjack-game-edge
+  homepage: https://github.com/sentra-ai-ui/blackjack-game-edge
 ---
 
 # Blackjack Game

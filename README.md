@@ -16,7 +16,7 @@ An interactive Blackjack card game skill for the [AI Edge Gallery](https://ai.go
 2. Go to Agent Skills
 3. Tap the "Skills" chip to open Skill Manager
 4. Tap the (+) button and select "Load skill from URL"
-5. Enter: `https://YOUR_USERNAME.github.io/blackjack-game-edge`
+5. Enter: `https://sentra-ai-ui.github.io/blackjack-game-edge`
 
 Or import locally:
 1. Push this folder to your Android device's Download folder
