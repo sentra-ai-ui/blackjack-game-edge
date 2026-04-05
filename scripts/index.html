@@ -3,22 +3,34 @@
 <head></head>
 <body>
 <script>
+// State is passed via URL query param: ?s=<base64encodedstate>
+function decodeState(encoded) {
+  if (!encoded) return null;
+  try {
+    // Handle URL-safe base64
+    const s = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(s));
+  } catch (e) { return null; }
+}
+
 window['ai_edge_gallery_get_result'] = async (data) => {
   try {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
-    const passedState = jsonData.state; // State passed from LLM's conversation context
     
-    // If state is passed from LLM, use it to restore game
-    if (passedState && passedState._active) {
-      window.bjState = passedState._active;
-    } else if (!window.bjState) {
-      window.bjState = {
+    // Get state from URL or from JSON data (stateEncoded)
+    let S = decodeState(jsonData.stateEncoded);
+    if (!S) {
+      // Try URL param
+      const params = new URLSearchParams(window.location.search);
+      S = decodeState(params.get('s'));
+    }
+    if (!S) {
+      S = {
         deck: [], playerHands: [], dealerHand: [], gameOver: false,
         activeHand: 0, sessionWins: 0, sessionLosses: 0, sessionPushes: 0
       };
     }
-    const S = window.bjState;
     
     const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
     const SYM = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
@@ -188,6 +200,11 @@ window['ai_edge_gallery_get_result'] = async (data) => {
         : 'Your turn';
     }
     
+    // Encode state to URL-safe base64
+    function encodeState(obj) {
+      return btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+    
     const responseData = {
       hands: handsInfo,
       dealer: { cards: dealerCards, total: dealerTotal },
@@ -197,11 +214,10 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       message: overallMessage,
       canSplit: canSplit(safeAccess(S.playerHands, S.activeHand)) && !S.gameOver && S.playerHands.length < 3,
       nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".',
-      // Include full state for LLM to pass back on next call
-      _active: S
+      _encoded: encodeState(S)
     };
     
-    // Text
+    // Text with embedded state for LLM to extract
     let text = '🃏 Blackjack\n';
     text += 'Session: ' + S.sessionWins + 'W / ' + S.sessionLosses + 'L / ' + S.sessionPushes + 'P\n\n';
     for (const h of handsInfo) {
@@ -211,11 +227,14 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     text += overallMessage;
     if (responseData.canSplit) text += '\n\n💡 Tip: You can "split"!';
     text += '\n\n' + responseData.nextHint;
+    // Include encoded state for LLM to pass back
+    text += '\n\n[STATE:' + responseData._encoded + ']';
+    
+    const webviewURL = 'webview.html?s=' + encodeState(S);
     
     return JSON.stringify({
       result: text,
-      state: responseData, // Return state object for LLM to include in next call
-      webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(responseData)), aspectRatio: 1.6 }
+      webview: { url: webviewURL, aspectRatio: 1.6 }
     });
     
   } catch (e) {

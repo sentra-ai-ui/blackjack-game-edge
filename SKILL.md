@@ -7,13 +7,12 @@ metadata:
 
 # Blackjack Game
 
-## IMPORTANT - State Preservation
+## IMPORTANT - State Management
 
-This game maintains state between turns. **You MUST include the `state` object from the previous response in every action call.**
+This game requires passing state between turns. The response includes `[STATE:xxx]` at the end which must be passed back on the next action.
 
-When calling the `run_js` tool:
-- Include the `state` field from the previous response as `data.state`
-- This allows the game to track the current hand, deck, and session score
+When calling `run_js`:
+- Include `stateEncoded` in data with the value from `[STATE:xxx]` in the previous response
 
 ## Instructions
 
@@ -21,7 +20,7 @@ Call the `run_js` tool with the following exact parameters:
 - script name: index.html
 - data: A JSON string with these fields:
   - action: String. One of: "new_game", "hit", "stand", or "split"
-  - state: Object. The `state` object from the previous response (to maintain game continuity)
+  - stateEncoded: String. The base64 state from `[STATE:xxx]` in the previous response. For first call, omit or use empty string.
 
 ## Example Calls
 
@@ -30,10 +29,12 @@ Call the `run_js` tool with the following exact parameters:
 {"action": "new_game"}
 ```
 
-**Subsequent calls (hit, stand, split):**
+**Subsequent calls (include state):**
 ```json
-{"action": "hit", "state": <copy the entire state object from previous response>}
+{"action": "hit", "stateEncoded": "eyJkZWNrIjpb..."}
 ```
+
+The LLM should parse the [STATE:...] tag from the previous response and include it in the next call.
 
 ## Game Rules
 
@@ -46,27 +47,15 @@ Call the `run_js` tool with the following exact parameters:
 ## Split
 
 - Available when your first two cards have the same rank.
-- Splits the hand into two separate hands.
-- Same bet is placed on the second hand automatically.
-- Up to 3 hands max.
-
-## Actions
-
-**new_game**: Start a fresh round.
-
-**hit**: Draw another card for the current hand.
-
-**stand**: Keep current hand. Auto-plays remaining hands and then dealer draws.
-
-**split**: Split your current hand into two (only with matching cards).
+- Splits into two hands. Up to 3 hands max.
 
 ## Session Tracking
 
-Win/Loss/Push counter persists across the session via the state object.
+Win/Loss/Push persists via state between turns.
 
 ## Output
 
 Returns:
 - Text summary with cards, totals, session score
-- Interactive webview with visual card table
-- State object (include in next action call)
+- Visual webview with card table
+- [STATE:xxx] tag at end of text (include in next action)
