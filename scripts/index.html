@@ -7,8 +7,12 @@ window['ai_edge_gallery_get_result'] = async (data) => {
   try {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
+    const passedState = jsonData.state; // State passed from LLM's conversation context
     
-    if (!window.bjState) {
+    // If state is passed from LLM, use it to restore game
+    if (passedState && passedState._active) {
+      window.bjState = passedState._active;
+    } else if (!window.bjState) {
       window.bjState = {
         deck: [], playerHands: [], dealerHand: [], gameOver: false,
         activeHand: 0, sessionWins: 0, sessionLosses: 0, sessionPushes: 0
@@ -47,16 +51,15 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     }
     function bj(h) { return h && h.length === 2 && total(h) === 21; }
     function deal() {
-      if (S.deck.length === 0) S.deck = shuffle(mkDeck());
-      if (S.deck.length === 0) return { s: 'spades', r: 'A' }; // fallback
+      if (!S.deck || S.deck.length === 0) S.deck = shuffle(mkDeck());
+      if (S.deck.length === 0) return { s: 'spades', r: 'A' };
       return S.deck.pop();
     }
     function canSplit(h) {
       return h && h.length === 2 && h[0].r === h[1].r;
     }
-    
     function handResult(h, dt, db) {
-      if (!h || h.length === 0) return { status: 'lose', result: 'lose', msg: 'No hand', display: '0' };
+      if (!h || h.length === 0) return { status: 'bust', result: 'lose', msg: 'No hand', display: '0' };
       const pt = total(h);
       const pb = bj(h);
       if (pt > 21) return { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
@@ -68,11 +71,9 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       if (dt > pt)    return { status: 'lose', result: 'lose', msg: dt + ' beats ' + pt, display: pt.toString() };
       return { status: 'push', result: 'push', msg: 'Push', display: pt.toString() };
     }
-    
     function safeAccess(arr, idx) {
       return arr && idx >= 0 && idx < arr.length ? arr[idx] : null;
     }
-    
     function endRound() {
       S.gameOver = true;
       while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
@@ -96,7 +97,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     } else if (action === 'hit') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
       const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
+      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       h.push(deal());
       const t = total(h);
       if (t > 21) {
@@ -117,7 +118,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     } else if (action === 'stand') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
       const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
+      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       h._stood = true;
       if (S.activeHand < S.playerHands.length - 1) {
         S.activeHand++;
@@ -127,7 +128,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     } else if (action === 'split') {
       if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
       const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h) return JSON.stringify({ error: 'No hand. Say "new_game".' });
+      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
       if (!canSplit(h)) return JSON.stringify({ error: 'Need two cards of same rank to split.' });
       if (S.playerHands.length >= 3) return JSON.stringify({ error: 'Max 3 hands allowed.' });
       const card1 = h[0], card2 = h[1];
@@ -146,7 +147,6 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       const active = i === S.activeHand && !S.gameOver;
       const t = total(h);
       const pb = bj(h);
-      
       let r;
       if (S.gameOver) {
         r = handResult(h, dt, db);
@@ -159,7 +159,6 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       } else {
         r = { status: 'playing', result: 'pending', msg: active ? "Your turn" : "Waiting", display: t.toString() };
       }
-      
       return {
         index: i,
         cards: h.map(c => c.r + SYM[c.s]),
@@ -173,7 +172,6 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     const dealerCards = S.dealerHand.map((c, i) => (hideDealer && i > 0) ? '??' : c.r + SYM[c.s]);
     const dealerTotal = hideDealer ? '?' : (db ? 'BJ' : dt.toString());
     
-    // Overall
     let overallStatus = 'playing';
     let overallMessage = '';
     if (S.gameOver) {
@@ -198,7 +196,9 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       status: overallStatus,
       message: overallMessage,
       canSplit: canSplit(safeAccess(S.playerHands, S.activeHand)) && !S.gameOver && S.playerHands.length < 3,
-      nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".'
+      nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".',
+      // Include full state for LLM to pass back on next call
+      _active: S
     };
     
     // Text
@@ -214,6 +214,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     
     return JSON.stringify({
       result: text,
+      state: responseData, // Return state object for LLM to include in next call
       webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(responseData)), aspectRatio: 1.6 }
     });
     
