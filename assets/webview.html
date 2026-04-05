@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Blackjack</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d4f1c; color: white; min-height: 100vh; padding: 15px; display: flex; align-items: center; justify-content: center; }
+    .table { background: linear-gradient(135deg, #1a5c2e 0%, #0d4f1c 100%); border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+    h2 { font-size: 11px; color: #ffd700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .cards { display: flex; gap: 8px; flex-wrap: wrap; min-height: 70px; margin-bottom: 12px; }
+    .card { display: flex; align-items: center; justify-content: center; padding: 10px 14px; background: white; color: #1a1a1a; border-radius: 8px; font-weight: bold; font-size: 18px; min-width: 48px; box-shadow: 0 3px 10px rgba(0,0,0,0.2); }
+    .card.red { color: #c41e3a; }
+    .card.hidden { background: linear-gradient(135deg, #1e3a5f, #0d1f33); color: #ffd700; font-size: 22px; border: 2px solid #3a6ea5; }
+    .total { font-size: 14px; background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 8px; margin-bottom: 15px; }
+    .total span { color: #ffd700; font-weight: bold; }
+    .msg { text-align: center; font-size: 15px; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+    .msg.win     { background: linear-gradient(135deg, #4CAF50, #2E7D32); }
+    .msg.lose    { background: linear-gradient(135deg, #f44336, #c62828); }
+    .msg.push    { background: linear-gradient(135deg, #ff9800, #f57c00); }
+    .msg.bust    { background: linear-gradient(135deg, #9c27b0, #6a1b9a); }
+    .msg.bj      { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #1a1a1a; }
+    .msg.playing { background: rgba(0,0,0,0.15); }
+    .hint { text-align: center; font-size: 12px; color: #aaa; margin-top: 10px; }
+    .sep { height: 1px; background: rgba(255,255,255,0.1); margin: 15px 0; }
+    .label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <div class="table">
+    <div class="label">Dealer</div>
+    <div id="dealer-cards" class="cards"></div>
+    <div class="total">Total: <span id="dealer-total">?</span></div>
+    
+    <div class="sep"></div>
+    
+    <div class="label">Your Hand</div>
+    <div id="player-cards" class="cards"></div>
+    <div class="total">Total: <span id="player-total">0</span></div>
+    
+    <div id="message" class="msg playing"></div>
+    <div id="hint" class="hint"></div>
+  </div>
+
+  <script>
+    function getState() {
+      const params = new URLSearchParams(window.location.search);
+      const encoded = params.get('state');
+      if (!encoded) return null;
+      try {
+        return JSON.parse(decodeURIComponent(encoded));
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    function render(state) {
+      if (!state) {
+        document.getElementById('message').textContent = 'Error loading game state.';
+        return;
+      }
+      
+      // Render player cards
+      document.getElementById('player-cards').innerHTML = state.pc.map(c => 
+        '<div class="card">' + c + '</div>'
+      ).join('');
+      
+      // Render dealer cards (check if first char is ?)
+      document.getElementById('dealer-cards').innerHTML = state.dc.map(c => 
+        c === '??' ? '<div class="card hidden">?</div>' : '<div class="card">' + c + '</div>'
+      ).join('');
+      
+      document.getElementById('player-total').textContent = state.pt;
+      document.getElementById('dealer-total').textContent = state.dt;
+      
+      const msgEl = document.getElementById('message');
+      msgEl.textContent = state.msg;
+      msgEl.className = 'msg ' + (state.st === 'playing' ? 'playing' : 
+        state.st === 'win' || state.st === 'blackjack' || state.st === 'dealer_bust' ? 'win' :
+        state.st === 'lose' ? 'lose' : state.st === 'bust' ? 'bust' : 'push');
+      
+      document.getElementById('hint').textContent = state.next;
+    }
+    
+    render(getState());
+  </script>
+</body>
+</html>
