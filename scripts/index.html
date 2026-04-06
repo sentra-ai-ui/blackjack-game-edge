@@ -3,22 +3,28 @@
 <head></head>
 <body>
 <script>
-const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
-const SYM = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
-const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
-
-function createDeck() {
-  const d = [];
-  for (const s of SUITS) for (const r of RANKS) d.push({s, r});
-  return d;
+// Seeded random for deterministic deck
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
 }
 
-function shuffle(d) {
-  for (let i = d.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [d[i], d[j]] = [d[j], d[i]];
+const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
+const SUIT_SYM = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+
+function createDeck(rng) {
+  const deck = [];
+  for (const s of SUITS) for (const r of RANKS) deck.push({s, r});
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
   }
-  return d;
+  return deck;
 }
 
 function val(c) {
@@ -35,167 +41,163 @@ function total(h) {
 }
 
 function bj(h) { return h && h.length === 2 && total(h) === 21; }
-function fmt(c) { return c.r + SYM[c.s]; }
+function fmt(c) { return c.r + SUIT_SYM[c.s]; }
 
-function fmtResponse(r) {
-  let t = '🃏 Blackjack\n\n';
-  t += 'Your hand: ' + r.playerCards.join(' ') + ' (' + r.playerTotal + ')\n';
-  t += 'Dealer: ' + r.dealerCards.join(' ') + ' (' + r.dealerTotal + ')\n';
-  t += '\n' + r.message + '\n';
-  t += '\n' + r.nextHint;
-  return t;
+function fmtResult(r) {
+  return '🃏 Blackjack\n\n' +
+    'Your hand: ' + r.pc + ' (' + r.pt + ')\n' +
+    'Dealer: ' + r.dc + ' (' + r.dt + ')\n\n' +
+    r.msg + '\n\n' +
+    r.hint;
 }
 
 window['ai_edge_gallery_get_result'] = async (data) => {
   try {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
-    const game = jsonData.game || null;
+    
+    // For hit/stand, we need the seed from previous response
+    // The LLM passes: seed (number), deckIndex (number), playerHand (array of card strings), dealerHand (array of card strings)
+    let seed = jsonData.seed || Date.now();
+    let deckIdx = jsonData.deckIndex || 0;
+    let playerHand = jsonData.playerHand || [];
+    let dealerHand = jsonData.dealerHand || [];
+    
+    // Parse card strings back to objects for internal use
+    function parseCard(str) {
+      // Format: "A♥" or "10♣"
+      const suit = str.slice(-1);
+      const rank = str.slice(0, -1);
+      return { s: suit === '♥' ? 'hearts' : suit === '♦' ? 'diamonds' : suit === '♣' ? 'clubs' : 'spades', r: rank };
+    }
+    
+    const rng = mulberry32(seed);
+    let deck = createDeck(rng);
+    
+    function deal() {
+      if (deckIdx >= deck.length) { deck = createDeck(rng); deckIdx = 0; }
+      return deck[deckIdx++];
+    }
+    
+    let result;
     
     if (action === 'new_game') {
-      // Fresh deck
-      let deck = shuffle(createDeck());
-      let di = 0;
-      const deal = () => deck[di++];
+      seed = Date.now();
+      const newRng = mulberry32(seed);
+      deck = createDeck(newRng);
+      deckIdx = 0;
       
-      const ph = [deal(), deal()];
-      const dh = [deal(), deal()];
-      const pt = total(ph);
-      const pb = bj(ph);
+      playerHand = [fmt(deal()), fmt(deal())];
+      dealerHand = [fmt(deal()), fmt(deal())];
       
-      let st = 'playing', msg = pb ? 'Blackjack!' : 'Your turn. Hit or stand?';
+      const pt = total(playerHand.map(parseCard));
+      const pb = bj(playerHand.map(parseCard));
       
-      // Check dealer blackjack on new game if player also has BJ
+      let msg, hint, st = 'playing';
       if (pb) {
-        const dt = total(dh);
-        const db = bj(dh);
-        if (db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
-        else { st = 'win'; msg = 'Blackjack! You win!'; }
+        // Check dealer
+        const dt = total(dealerHand.map(parseCard));
+        const db = bj(dealerHand.map(parseCard));
+        if (db) { msg = 'Both Blackjack - Push!'; st = 'push'; }
+        else { msg = 'Blackjack! You win!'; st = 'win'; }
+        hint = 'Say "new_game"';
+      } else {
+        msg = 'Your turn. Hit or stand?';
+        hint = 'Say "hit" or "stand"';
       }
       
-      const response = {
-        playerCards: ph.map(fmt),
-        dealerCards: [fmt(dh[0]), '??'],
-        playerTotal: pb ? 'BJ' : pt,
-        dealerTotal: '?',
-        playerStatus: pb ? 'bj' : 'playing',
-        status: st,
-        message: msg,
-        nextHint: st === 'playing' ? 'Say "hit" or "stand"' : 'Say "new_game"',
-        game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: pb ? 'bj' : 'playing' }
+      result = {
+        seed: seed,
+        deckIndex: deckIdx,
+        playerHand: playerHand,
+        dealerHand: dealerHand,
+        pc: playerHand.join(' '),
+        pt: pb ? 'BJ' : pt,
+        dc: dealerHand[0] + ' ??',
+        dt: '?',
+        msg: msg,
+        hint: hint,
+        status: st
       };
-      
-      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
       
     } else if (action === 'hit') {
-      if (!game || !game.deck) return JSON.stringify({ error: 'Say "new_game" first.' });
+      if (!jsonData.seed) return JSON.stringify({ error: 'Say "new_game" first.' });
       
-      const deck = game.deck;
-      let di = game.deckIndex;
-      const deal = () => deck[di++];
+      playerHand.push(fmt(deal()));
+      deckIdx = deckIdx;
+      const pt = total(playerHand.map(parseCard));
       
-      const ph = [...game.playerHand, deal()];
-      const dh = game.dealerHand;
-      const pt = total(ph);
-      const pb = bj(ph);
-      
-      let response;
       if (pt > 21) {
-        response = {
-          playerCards: ph.map(fmt),
-          dealerCards: dh.map(fmt),
-          playerTotal: 'BUST',
-          dealerTotal: total(dh),
-          playerStatus: 'bust',
-          status: 'lose',
-          message: 'Bust! Dealer wins.',
-          nextHint: 'Say "new_game"',
-          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'bust' }
+        // Bust
+        const dt = total(dealerHand.map(parseCard));
+        result = {
+          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
+          pc: playerHand.join(' '), pt: 'BUST',
+          dc: dealerHand.join(' '), dt: dt,
+          msg: 'Bust! You went over 21.', hint: 'Say "new_game"', status: 'lose'
         };
       } else if (pt === 21) {
-        // Auto-stand on 21
-        while (total(dh) < 17) dh.push(deal());
-        di = game.deckIndex + (dh.length - game.dealerHand.length);
-        const dt = total(dh);
-        const db = bj(dh);
-        const pb2 = bj(ph);
-        let st = 'lose', msg = dt + ' beats ' + pt;
-        if (db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
-        else if (pb2 && !db) { st = 'win'; msg = 'Blackjack!'; }
-        else if (dt > 21) { st = 'win'; msg = 'Dealer busts!'; }
-        else if (pt > dt) { st = 'win'; msg = pt + ' beats ' + dt; }
-        else if (dt > pt) { st = 'lose'; msg = dt + ' beats ' + pt; }
-        else { st = 'push'; msg = 'Push'; }
+        // Auto stand - dealer plays
+        while (total(dealerHand.map(parseCard)) < 17) dealerHand.push(fmt(deal()));
+        const dt = total(dealerHand.map(parseCard));
+        const db = bj(dealerHand.map(parseCard));
+        let msg, st;
+        if (db) { msg = 'Dealer Blackjack!'; st = 'lose'; }
+        else if (dt > 21) { msg = 'Dealer busts! You win!'; st = 'win'; }
+        else if (pt > dt) { msg = pt + ' beats ' + dt + '! You win!'; st = 'win'; }
+        else if (dt > pt) { msg = dt + ' beats ' + pt + '. Dealer wins.'; st = 'lose'; }
+        else { msg = 'Push!'; st = 'push'; }
         
-        response = {
-          playerCards: ph.map(fmt),
-          dealerCards: dh.map(fmt),
-          playerTotal: '21',
-          dealerTotal: db ? 'BJ' : dt,
-          playerStatus: 'stood',
-          status: st,
-          message: msg,
-          nextHint: 'Say "new_game"',
-          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'stood' }
+        result = {
+          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
+          pc: playerHand.join(' '), pt: '21',
+          dc: dealerHand.join(' '), dt: db ? 'BJ' : dt,
+          msg: msg, hint: 'Say "new_game"', status: st
         };
       } else {
-        response = {
-          playerCards: ph.map(fmt),
-          dealerCards: [fmt(dh[0]), '??'],
-          playerTotal: pt,
-          dealerTotal: '?',
-          playerStatus: 'playing',
-          status: 'playing',
-          message: 'Your turn. Hit or stand?',
-          nextHint: 'Say "hit" or "stand"',
-          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'playing' }
+        result = {
+          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
+          pc: playerHand.join(' '), pt: pt,
+          dc: dealerHand[0] + ' ??', dt: '?',
+          msg: 'Your turn. Hit or stand?', hint: 'Say "hit" or "stand"', status: 'playing'
         };
       }
       
-      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
-      
     } else if (action === 'stand') {
-      if (!game || !game.deck) return JSON.stringify({ error: 'Say "new_game" first.' });
+      if (!jsonData.seed) return JSON.stringify({ error: 'Say "new_game" first.' });
       
-      const deck = game.deck;
-      let di = game.deckIndex;
-      const deal = () => deck[di++];
+      // Dealer plays
+      while (total(dealerHand.map(parseCard)) < 17) dealerHand.push(fmt(deal()));
       
-      let dh = [...game.dealerHand];
-      while (total(dh) < 17) dh.push(deal());
+      const pt = total(playerHand.map(parseCard));
+      const dt = total(dealerHand.map(parseCard));
+      const pb = bj(playerHand.map(parseCard));
+      const db = bj(dealerHand.map(parseCard));
       
-      const ph = game.playerHand;
-      const pt = total(ph);
-      const dt = total(dh);
-      const pb = bj(ph);
-      const db = bj(dh);
+      let msg, st;
+      if (pb && db) { msg = 'Both Blackjack - Push!'; st = 'push'; }
+      else if (db) { msg = 'Dealer Blackjack!'; st = 'lose'; }
+      else if (pb) { msg = 'Blackjack! You win!'; st = 'win'; }
+      else if (dt > 21) { msg = 'Dealer busts! You win!'; st = 'win'; }
+      else if (pt > dt) { msg = pt + ' beats ' + dt + '! You win!'; st = 'win'; }
+      else if (dt > pt) { msg = dt + ' beats ' + pt + '. Dealer wins.'; st = 'lose'; }
+      else { msg = 'Push!'; st = 'push'; }
       
-      let st, msg;
-      if (pb && db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
-      else if (db) { st = 'lose'; msg = 'Dealer Blackjack!'; }
-      else if (pb) { st = 'win'; msg = 'Blackjack! You win!'; }
-      else if (dt > 21) { st = 'win'; msg = 'Dealer busts! You win!'; }
-      else if (pt > dt) { st = 'win'; msg = pt + ' beats ' + dt + '! You win!'; }
-      else if (dt > pt) { st = 'lose'; msg = dt + ' beats ' + pt + '. Dealer wins.'; }
-      else { st = 'push'; msg = 'Push - tie game.'; }
-      
-      const response = {
-        playerCards: ph.map(fmt),
-        dealerCards: dh.map(fmt),
-        playerTotal: pb ? 'BJ' : pt,
-        dealerTotal: db ? 'BJ' : dt,
-        playerStatus: pb ? 'bj' : 'stood',
-        status: st,
-        message: msg,
-        nextHint: 'Say "new_game"',
-        game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'stood' }
+      result = {
+        seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
+        pc: playerHand.join(' '), pt: pb ? 'BJ' : pt,
+        dc: dealerHand.join(' '), dt: db ? 'BJ' : dt,
+        msg: msg, hint: 'Say "new_game"', status: st
       };
-      
-      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
       
     } else {
       return JSON.stringify({ error: 'Use "new_game", "hit", or "stand".' });
     }
+    
+    return JSON.stringify({
+      result: fmtResult(result),
+      webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(result)), aspectRatio: 1.6 }
+    });
     
   } catch (e) {
     return JSON.stringify({ error: 'Error: ' + e.message });
