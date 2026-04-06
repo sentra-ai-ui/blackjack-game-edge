@@ -3,7 +3,6 @@
 <head></head>
 <body>
 <script>
-// Seeded random for deterministic deck
 function mulberry32(seed) {
   return function() {
     let t = seed += 0x6D2B79F5;
@@ -28,27 +27,48 @@ function createDeck(rng) {
 }
 
 function val(c) {
+  if (!c) return 0;
   if (['J','Q','K'].includes(c.r)) return 10;
   if (c.r === 'A') return 11;
-  return +c.r;
+  return parseInt(c.r) || 0;
 }
 
 function total(h) {
+  if (!h || !Array.isArray(h)) return 0;
   let t = 0, a = 0;
-  for (const c of h) { t += val(c); if (c.r === 'A') a++; }
+  for (const c of h) { t += val(c); if (c && c.r === 'A') a++; }
   while (t > 21 && a > 0) { t -= 10; a--; }
   return t;
 }
 
 function bj(h) { return h && h.length === 2 && total(h) === 21; }
-function fmt(c) { return c.r + SUIT_SYM[c.s]; }
 
-function fmtResult(r) {
-  return '🃏 Blackjack\n\n' +
-    'Your hand: ' + r.pc + ' (' + r.pt + ')\n' +
-    'Dealer: ' + r.dc + ' (' + r.dt + ')\n\n' +
-    r.msg + '\n\n' +
-    r.hint;
+function fmt(c) {
+  if (!c) return '?';
+  return c.r + (SUIT_SYM[c.s] || '?');
+}
+
+function parseCard(str) {
+  if (!str || typeof str !== 'string' || str.length < 2) {
+    return { s: 'spades', r: 'A' };
+  }
+  const suit = str.slice(-1);
+  const rank = str.slice(0, -1);
+  const suitMap = { '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs', '♠': 'spades' };
+  return { s: suitMap[suit] || 'spades', r: rank || 'A' };
+}
+
+function getHand(arr) {
+  if (!arr || !Array.isArray(arr)) return [];
+  return arr.map(parseCard);
+}
+
+function fmtHand(arr) {
+  if (!arr || !Array.isArray(arr)) return [];
+  return arr.map(s => {
+    if (typeof s !== 'string') return '??';
+    return s;
+  });
 }
 
 window['ai_edge_gallery_get_result'] = async (data) => {
@@ -56,48 +76,37 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
     
-    // For hit/stand, we need the seed from previous response
-    // The LLM passes: seed (number), deckIndex (number), playerHand (array of card strings), dealerHand (array of card strings)
-    let seed = jsonData.seed || Date.now();
-    let deckIdx = jsonData.deckIndex || 0;
-    let playerHand = jsonData.playerHand || [];
-    let dealerHand = jsonData.dealerHand || [];
-    
-    // Parse card strings back to objects for internal use
-    function parseCard(str) {
-      // Format: "A♥" or "10♣"
-      const suit = str.slice(-1);
-      const rank = str.slice(0, -1);
-      return { s: suit === '♥' ? 'hearts' : suit === '♦' ? 'diamonds' : suit === '♣' ? 'clubs' : 'spades', r: rank };
-    }
+    let seed = parseInt(jsonData.seed) || Date.now();
+    let deckIdx = parseInt(jsonData.deckIndex) || 0;
+    let playerHand = Array.isArray(jsonData.playerHand) ? jsonData.playerHand : [];
+    let dealerHand = Array.isArray(jsonData.dealerHand) ? jsonData.dealerHand : [];
     
     const rng = mulberry32(seed);
     let deck = createDeck(rng);
     
     function deal() {
       if (deckIdx >= deck.length) { deck = createDeck(rng); deckIdx = 0; }
-      return deck[deckIdx++];
+      return deck[deckIdx++] || { s: 'spades', r: 'A' };
     }
     
     let result;
     
     if (action === 'new_game') {
       seed = Date.now();
-      const newRng = mulberry32(seed);
-      deck = createDeck(newRng);
+      deck = createDeck(mulberry32(seed));
       deckIdx = 0;
-      
       playerHand = [fmt(deal()), fmt(deal())];
       dealerHand = [fmt(deal()), fmt(deal())];
       
-      const pt = total(playerHand.map(parseCard));
-      const pb = bj(playerHand.map(parseCard));
+      const ph = getHand(playerHand);
+      const dh = getHand(dealerHand);
+      const pt = total(ph);
+      const pb = bj(ph);
       
       let msg, hint, st = 'playing';
       if (pb) {
-        // Check dealer
-        const dt = total(dealerHand.map(parseCard));
-        const db = bj(dealerHand.map(parseCard));
+        const dt = total(dh);
+        const db = bj(dh);
         if (db) { msg = 'Both Blackjack - Push!'; st = 'push'; }
         else { msg = 'Blackjack! You win!'; st = 'win'; }
         hint = 'Say "new_game"';
@@ -107,40 +116,39 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       }
       
       result = {
-        seed: seed,
-        deckIndex: deckIdx,
-        playerHand: playerHand,
-        dealerHand: dealerHand,
-        pc: playerHand.join(' '),
+        seed: seed, deckIndex: deckIdx,
+        playerHand: playerHand, dealerHand: dealerHand,
+        pc: fmtHand(playerHand).join(' '),
         pt: pb ? 'BJ' : pt,
-        dc: dealerHand[0] + ' ??',
+        dc: fmtHand([dealerHand[0]]).join('') + ' ??',
         dt: '?',
-        msg: msg,
-        hint: hint,
-        status: st
+        msg: msg, hint: hint, status: st
       };
       
     } else if (action === 'hit') {
-      if (!jsonData.seed) return JSON.stringify({ error: 'Say "new_game" first.' });
+      if (!jsonData.seed) {
+        return JSON.stringify({ error: 'Say "new_game" first.' });
+      }
       
       playerHand.push(fmt(deal()));
-      deckIdx = deckIdx;
-      const pt = total(playerHand.map(parseCard));
+      const ph = getHand(playerHand);
+      const pt = total(ph);
       
       if (pt > 21) {
-        // Bust
-        const dt = total(dealerHand.map(parseCard));
+        const dh = getHand(dealerHand);
+        const dt = total(dh);
         result = {
-          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
-          pc: playerHand.join(' '), pt: 'BUST',
-          dc: dealerHand.join(' '), dt: dt,
+          seed, deckIndex: deckIdx, playerHand, dealerHand,
+          pc: fmtHand(playerHand).join(' '), pt: 'BUST',
+          dc: fmtHand(dealerHand).join(' '), dt: dt,
           msg: 'Bust! You went over 21.', hint: 'Say "new_game"', status: 'lose'
         };
       } else if (pt === 21) {
-        // Auto stand - dealer plays
-        while (total(dealerHand.map(parseCard)) < 17) dealerHand.push(fmt(deal()));
-        const dt = total(dealerHand.map(parseCard));
-        const db = bj(dealerHand.map(parseCard));
+        let dh = getHand(dealerHand);
+        while (total(dh) < 17) dh.push(deal());
+        dealerHand = dh.map(fmt);
+        const dt = total(dh);
+        const db = bj(dh);
         let msg, st;
         if (db) { msg = 'Dealer Blackjack!'; st = 'lose'; }
         else if (dt > 21) { msg = 'Dealer busts! You win!'; st = 'win'; }
@@ -149,30 +157,34 @@ window['ai_edge_gallery_get_result'] = async (data) => {
         else { msg = 'Push!'; st = 'push'; }
         
         result = {
-          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
-          pc: playerHand.join(' '), pt: '21',
-          dc: dealerHand.join(' '), dt: db ? 'BJ' : dt,
-          msg: msg, hint: 'Say "new_game"', status: st
+          seed, deckIndex: deckIdx, playerHand, dealerHand,
+          pc: fmtHand(playerHand).join(' '), pt: '21',
+          dc: fmtHand(dealerHand).join(' '), dt: db ? 'BJ' : dt,
+          msg, hint: 'Say "new_game"', status: st
         };
       } else {
         result = {
-          seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
-          pc: playerHand.join(' '), pt: pt,
-          dc: dealerHand[0] + ' ??', dt: '?',
+          seed, deckIndex: deckIdx, playerHand, dealerHand,
+          pc: fmtHand(playerHand).join(' '), pt: pt,
+          dc: fmtHand([dealerHand[0]]).join('') + ' ??', dt: '?',
           msg: 'Your turn. Hit or stand?', hint: 'Say "hit" or "stand"', status: 'playing'
         };
       }
       
     } else if (action === 'stand') {
-      if (!jsonData.seed) return JSON.stringify({ error: 'Say "new_game" first.' });
+      if (!jsonData.seed) {
+        return JSON.stringify({ error: 'Say "new_game" first.' });
+      }
       
-      // Dealer plays
-      while (total(dealerHand.map(parseCard)) < 17) dealerHand.push(fmt(deal()));
+      let dh = getHand(dealerHand);
+      while (total(dh) < 17) dh.push(deal());
+      dealerHand = dh.map(fmt);
       
-      const pt = total(playerHand.map(parseCard));
-      const dt = total(dealerHand.map(parseCard));
-      const pb = bj(playerHand.map(parseCard));
-      const db = bj(dealerHand.map(parseCard));
+      const ph = getHand(playerHand);
+      const pt = total(ph);
+      const dt = total(dh);
+      const pb = bj(ph);
+      const db = bj(dh);
       
       let msg, st;
       if (pb && db) { msg = 'Both Blackjack - Push!'; st = 'push'; }
@@ -184,18 +196,24 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       else { msg = 'Push!'; st = 'push'; }
       
       result = {
-        seed: seed, deckIndex: deckIdx, playerHand: playerHand, dealerHand: dealerHand,
-        pc: playerHand.join(' '), pt: pb ? 'BJ' : pt,
-        dc: dealerHand.join(' '), dt: db ? 'BJ' : dt,
-        msg: msg, hint: 'Say "new_game"', status: st
+        seed, deckIndex: deckIdx, playerHand, dealerHand,
+        pc: fmtHand(playerHand).join(' '), pt: pb ? 'BJ' : pt,
+        dc: fmtHand(dealerHand).join(' '), dt: db ? 'BJ' : dt,
+        msg, hint: 'Say "new_game"', status: st
       };
       
     } else {
       return JSON.stringify({ error: 'Use "new_game", "hit", or "stand".' });
     }
     
+    const text = '🃏 Blackjack\n\n' +
+      'Your hand: ' + result.pc + ' (' + result.pt + ')\n' +
+      'Dealer: ' + result.dc + ' (' + result.dt + ')\n\n' +
+      result.msg + '\n\n' +
+      result.hint;
+    
     return JSON.stringify({
-      result: fmtResult(result),
+      result: text,
       webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(result)), aspectRatio: 1.6 }
     });
     
