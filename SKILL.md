@@ -1,26 +1,19 @@
 ---
 name: blackjack-game
-description: Play Blackjack against the dealer with split and win/loss tracking. Use "new_game", "hit", "stand", or "split".
+description: Play Blackjack against the dealer. Use "new_game", "hit", or "stand". State is maintained via the game object.
 metadata:
   homepage: https://github.com/sentra-ai-ui/blackjack-game-edge
 ---
 
 # Blackjack Game
 
-## IMPORTANT - State Management
-
-This game requires passing state between turns. The response includes `[STATE:xxx]` at the end which must be passed back on the next action.
-
-When calling `run_js`:
-- Include `stateEncoded` in data with the value from `[STATE:xxx]` in the previous response
-
-## Instructions
+## How to Play
 
 Call the `run_js` tool with the following exact parameters:
 - script name: index.html
 - data: A JSON string with these fields:
-  - action: String. One of: "new_game", "hit", "stand", or "split"
-  - stateEncoded: String. The base64 state from `[STATE:xxx]` in the previous response. For first call, omit or use empty string.
+  - action: String. One of: "new_game", "hit", or "stand"
+  - game: Object (optional, omit on first call). The `game` object from the previous response.
 
 ## Example Calls
 
@@ -29,33 +22,29 @@ Call the `run_js` tool with the following exact parameters:
 {"action": "new_game"}
 ```
 
-**Subsequent calls (include state):**
+**Subsequent calls (include game object):**
 ```json
-{"action": "hit", "stateEncoded": "eyJkZWNrIjpb..."}
+{"action": "hit", "game": {"deck": [...], "deckIndex": 4, "playerHand": [...], "dealerHand": [...], "playerStatus": "playing"}}
 ```
 
-The LLM should parse the [STATE:...] tag from the previous response and include it in the next call.
+The LLM should include the `game` field from the previous response in all subsequent action calls to maintain game continuity.
 
 ## Game Rules
 
 - Goal: Beat the dealer by getting closer to 21 without going over.
-- Number cards = face value. Face cards (J, Q, K) = 10. Aces = 1 or 11 (optimized automatically).
+- Number cards = face value. Face cards (J, Q, K) = 10. Aces = 1 or 11.
 - If your hand exceeds 21, you bust and lose.
 - Dealer hits on 16 or less, stands on 17+.
 - Blackjack (Ace + 10-value on initial deal) beats regular 21.
 
-## Split
+## Actions
 
-- Available when your first two cards have the same rank.
-- Splits into two hands. Up to 3 hands max.
+**new_game**: Start a fresh round.
 
-## Session Tracking
+**hit**: Draw another card. If you reach 21, dealer plays automatically.
 
-Win/Loss/Push persists via state between turns.
+**stand**: Keep your hand. Dealer draws until 17+.
 
 ## Output
 
-Returns:
-- Text summary with cards, totals, session score
-- Visual webview with card table
-- [STATE:xxx] tag at end of text (include in next action)
+Returns a text summary and an interactive webview with the card table.

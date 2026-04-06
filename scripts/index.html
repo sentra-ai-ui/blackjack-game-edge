@@ -3,239 +3,199 @@
 <head></head>
 <body>
 <script>
-// State is passed via URL query param: ?s=<base64encodedstate>
-function decodeState(encoded) {
-  if (!encoded) return null;
-  try {
-    // Handle URL-safe base64
-    const s = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(s));
-  } catch (e) { return null; }
+const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
+const SYM = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+
+function createDeck() {
+  const d = [];
+  for (const s of SUITS) for (const r of RANKS) d.push({s, r});
+  return d;
+}
+
+function shuffle(d) {
+  for (let i = d.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [d[i], d[j]] = [d[j], d[i]];
+  }
+  return d;
+}
+
+function val(c) {
+  if (['J','Q','K'].includes(c.r)) return 10;
+  if (c.r === 'A') return 11;
+  return +c.r;
+}
+
+function total(h) {
+  let t = 0, a = 0;
+  for (const c of h) { t += val(c); if (c.r === 'A') a++; }
+  while (t > 21 && a > 0) { t -= 10; a--; }
+  return t;
+}
+
+function bj(h) { return h && h.length === 2 && total(h) === 21; }
+function fmt(c) { return c.r + SYM[c.s]; }
+
+function fmtResponse(r) {
+  let t = '🃏 Blackjack\n\n';
+  t += 'Your hand: ' + r.playerCards.join(' ') + ' (' + r.playerTotal + ')\n';
+  t += 'Dealer: ' + r.dealerCards.join(' ') + ' (' + r.dealerTotal + ')\n';
+  t += '\n' + r.message + '\n';
+  t += '\n' + r.nextHint;
+  return t;
 }
 
 window['ai_edge_gallery_get_result'] = async (data) => {
   try {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
+    const game = jsonData.game || null;
     
-    // Get state from URL or from JSON data (stateEncoded)
-    let S = decodeState(jsonData.stateEncoded);
-    if (!S) {
-      // Try URL param
-      const params = new URLSearchParams(window.location.search);
-      S = decodeState(params.get('s'));
-    }
-    if (!S) {
-      S = {
-        deck: [], playerHands: [], dealerHand: [], gameOver: false,
-        activeHand: 0, sessionWins: 0, sessionLosses: 0, sessionPushes: 0
-      };
-    }
-    
-    const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
-    const SYM = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
-    const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
-    
-    function mkDeck() {
-      const d = [];
-      for (const s of SUITS) for (const r of RANKS) d.push({s, r});
-      return d;
-    }
-    function shuffle(a) {
-      const arr = [...a];
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-      return arr;
-    }
-    function val(c) {
-      if (['J','Q','K'].includes(c.r)) return 10;
-      if (c.r === 'A') return 11;
-      return +c.r;
-    }
-    function total(h) {
-      if (!h || h.length === 0) return 0;
-      let t = 0, a = 0;
-      for (const c of h) { t += val(c); if (c.r === 'A') a++; }
-      while (t > 21 && a > 0) { t -= 10; a--; }
-      return t;
-    }
-    function bj(h) { return h && h.length === 2 && total(h) === 21; }
-    function deal() {
-      if (!S.deck || S.deck.length === 0) S.deck = shuffle(mkDeck());
-      if (S.deck.length === 0) return { s: 'spades', r: 'A' };
-      return S.deck.pop();
-    }
-    function canSplit(h) {
-      return h && h.length === 2 && h[0].r === h[1].r;
-    }
-    function handResult(h, dt, db) {
-      if (!h || h.length === 0) return { status: 'bust', result: 'lose', msg: 'No hand', display: '0' };
-      const pt = total(h);
-      const pb = bj(h);
-      if (pt > 21) return { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
-      if (pb && db)   return { status: 'bj',   result: 'push', msg: 'Both Blackjack', display: 'BJ' };
-      if (db)         return { status: 'lose', result: 'lose', msg: 'Dealer BJ', display: pt.toString() };
-      if (pb)         return { status: 'bj',   result: 'win',  msg: 'Blackjack!', display: 'BJ' };
-      if (dt > 21)    return { status: 'win',  result: 'win',  msg: 'Dealer busts', display: pt.toString() };
-      if (pt > dt)    return { status: 'win',  result: 'win',  msg: pt + ' beats ' + dt, display: pt.toString() };
-      if (dt > pt)    return { status: 'lose', result: 'lose', msg: dt + ' beats ' + pt, display: pt.toString() };
-      return { status: 'push', result: 'push', msg: 'Push', display: pt.toString() };
-    }
-    function safeAccess(arr, idx) {
-      return arr && idx >= 0 && idx < arr.length ? arr[idx] : null;
-    }
-    function endRound() {
-      S.gameOver = true;
-      while (total(S.dealerHand) < 17) S.dealerHand.push(deal());
-      const dt = total(S.dealerHand);
-      const db = bj(S.dealerHand);
-      for (const h of S.playerHands) {
-        const r = handResult(h, dt, db);
-        if (r.result === 'win')  S.sessionWins++;
-        if (r.result === 'lose') S.sessionLosses++;
-        if (r.result === 'push') S.sessionPushes++;
-      }
-    }
-    
-    // === GAME LOGIC ===
     if (action === 'new_game') {
-      S.deck = shuffle(mkDeck());
-      S.playerHands = [[deal(), deal()]];
-      S.dealerHand = [deal(), deal()];
-      S.gameOver = false;
-      S.activeHand = 0;
-    } else if (action === 'hit') {
-      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
-      h.push(deal());
-      const t = total(h);
-      if (t > 21) {
-        h._bust = true;
-        if (S.activeHand < S.playerHands.length - 1) {
-          S.activeHand++;
-        } else {
-          endRound();
-        }
-      } else if (t === 21) {
-        h._stood = true;
-        if (S.activeHand < S.playerHands.length - 1) {
-          S.activeHand++;
-        } else {
-          endRound();
-        }
+      // Fresh deck
+      let deck = shuffle(createDeck());
+      let di = 0;
+      const deal = () => deck[di++];
+      
+      const ph = [deal(), deal()];
+      const dh = [deal(), deal()];
+      const pt = total(ph);
+      const pb = bj(ph);
+      
+      let st = 'playing', msg = pb ? 'Blackjack!' : 'Your turn. Hit or stand?';
+      
+      // Check dealer blackjack on new game if player also has BJ
+      if (pb) {
+        const dt = total(dh);
+        const db = bj(dh);
+        if (db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
+        else { st = 'win'; msg = 'Blackjack! You win!'; }
       }
-    } else if (action === 'stand') {
-      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
-      h._stood = true;
-      if (S.activeHand < S.playerHands.length - 1) {
-        S.activeHand++;
-      } else {
-        endRound();
-      }
-    } else if (action === 'split') {
-      if (S.gameOver) return JSON.stringify({ error: 'Game over. Say "new_game".' });
-      const h = safeAccess(S.playerHands, S.activeHand);
-      if (!h || h.length === 0) return JSON.stringify({ error: 'No hand. Say "new_game".' });
-      if (!canSplit(h)) return JSON.stringify({ error: 'Need two cards of same rank to split.' });
-      if (S.playerHands.length >= 3) return JSON.stringify({ error: 'Max 3 hands allowed.' });
-      const card1 = h[0], card2 = h[1];
-      S.playerHands[S.activeHand] = [card1, deal()];
-      S.playerHands.splice(S.activeHand + 1, 0, [card2, deal()]);
-    } else {
-      return JSON.stringify({ error: 'Use: new_game, hit, stand, or split.' });
-    }
-    
-    // === BUILD RESPONSE ===
-    const hideDealer = !S.gameOver;
-    const dt = total(S.dealerHand);
-    const db = bj(S.dealerHand);
-    
-    const handsInfo = S.playerHands.map((h, i) => {
-      const active = i === S.activeHand && !S.gameOver;
-      const t = total(h);
-      const pb = bj(h);
-      let r;
-      if (S.gameOver) {
-        r = handResult(h, dt, db);
-      } else if (h._bust) {
-        r = { status: 'bust', result: 'lose', msg: 'Bust!', display: 'BUST' };
-      } else if (h._stood) {
-        r = { status: 'stood', result: 'pending', msg: 'Standing at ' + t, display: t.toString() };
-      } else if (pb) {
-        r = { status: 'bj', result: 'win', msg: 'Blackjack!', display: 'BJ' };
-      } else {
-        r = { status: 'playing', result: 'pending', msg: active ? "Your turn" : "Waiting", display: t.toString() };
-      }
-      return {
-        index: i,
-        cards: h.map(c => c.r + SYM[c.s]),
-        total: r.display,
-        status: r.status,
-        message: r.msg,
-        active: active
+      
+      const response = {
+        playerCards: ph.map(fmt),
+        dealerCards: [fmt(dh[0]), '??'],
+        playerTotal: pb ? 'BJ' : pt,
+        dealerTotal: '?',
+        playerStatus: pb ? 'bj' : 'playing',
+        status: st,
+        message: msg,
+        nextHint: st === 'playing' ? 'Say "hit" or "stand"' : 'Say "new_game"',
+        game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: pb ? 'bj' : 'playing' }
       };
-    });
-    
-    const dealerCards = S.dealerHand.map((c, i) => (hideDealer && i > 0) ? '??' : c.r + SYM[c.s]);
-    const dealerTotal = hideDealer ? '?' : (db ? 'BJ' : dt.toString());
-    
-    let overallStatus = 'playing';
-    let overallMessage = '';
-    if (S.gameOver) {
-      const wins = handsInfo.filter(h => h.status === 'win' || h.status === 'bj').length;
-      const losses = handsInfo.filter(h => h.status === 'lose' || h.status === 'bust').length;
-      if (wins > 0 && losses === 0) { overallStatus = 'win'; overallMessage = 'You win!'; }
-      else if (losses > 0 && wins === 0) { overallStatus = 'lose'; overallMessage = 'Dealer wins.'; }
-      else if (wins > losses) { overallStatus = 'win'; overallMessage = 'You win!'; }
-      else if (losses > wins) { overallStatus = 'lose'; overallMessage = 'Dealer wins.'; }
-      else { overallStatus = 'push'; overallMessage = 'Push!'; }
+      
+      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
+      
+    } else if (action === 'hit') {
+      if (!game || !game.deck) return JSON.stringify({ error: 'Say "new_game" first.' });
+      
+      const deck = game.deck;
+      let di = game.deckIndex;
+      const deal = () => deck[di++];
+      
+      const ph = [...game.playerHand, deal()];
+      const dh = game.dealerHand;
+      const pt = total(ph);
+      const pb = bj(ph);
+      
+      let response;
+      if (pt > 21) {
+        response = {
+          playerCards: ph.map(fmt),
+          dealerCards: dh.map(fmt),
+          playerTotal: 'BUST',
+          dealerTotal: total(dh),
+          playerStatus: 'bust',
+          status: 'lose',
+          message: 'Bust! Dealer wins.',
+          nextHint: 'Say "new_game"',
+          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'bust' }
+        };
+      } else if (pt === 21) {
+        // Auto-stand on 21
+        while (total(dh) < 17) dh.push(deal());
+        di = game.deckIndex + (dh.length - game.dealerHand.length);
+        const dt = total(dh);
+        const db = bj(dh);
+        const pb2 = bj(ph);
+        let st = 'lose', msg = dt + ' beats ' + pt;
+        if (db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
+        else if (pb2 && !db) { st = 'win'; msg = 'Blackjack!'; }
+        else if (dt > 21) { st = 'win'; msg = 'Dealer busts!'; }
+        else if (pt > dt) { st = 'win'; msg = pt + ' beats ' + dt; }
+        else if (dt > pt) { st = 'lose'; msg = dt + ' beats ' + pt; }
+        else { st = 'push'; msg = 'Push'; }
+        
+        response = {
+          playerCards: ph.map(fmt),
+          dealerCards: dh.map(fmt),
+          playerTotal: '21',
+          dealerTotal: db ? 'BJ' : dt,
+          playerStatus: 'stood',
+          status: st,
+          message: msg,
+          nextHint: 'Say "new_game"',
+          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'stood' }
+        };
+      } else {
+        response = {
+          playerCards: ph.map(fmt),
+          dealerCards: [fmt(dh[0]), '??'],
+          playerTotal: pt,
+          dealerTotal: '?',
+          playerStatus: 'playing',
+          status: 'playing',
+          message: 'Your turn. Hit or stand?',
+          nextHint: 'Say "hit" or "stand"',
+          game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'playing' }
+        };
+      }
+      
+      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
+      
+    } else if (action === 'stand') {
+      if (!game || !game.deck) return JSON.stringify({ error: 'Say "new_game" first.' });
+      
+      const deck = game.deck;
+      let di = game.deckIndex;
+      const deal = () => deck[di++];
+      
+      let dh = [...game.dealerHand];
+      while (total(dh) < 17) dh.push(deal());
+      
+      const ph = game.playerHand;
+      const pt = total(ph);
+      const dt = total(dh);
+      const pb = bj(ph);
+      const db = bj(dh);
+      
+      let st, msg;
+      if (pb && db) { st = 'push'; msg = 'Both Blackjack - Push!'; }
+      else if (db) { st = 'lose'; msg = 'Dealer Blackjack!'; }
+      else if (pb) { st = 'win'; msg = 'Blackjack! You win!'; }
+      else if (dt > 21) { st = 'win'; msg = 'Dealer busts! You win!'; }
+      else if (pt > dt) { st = 'win'; msg = pt + ' beats ' + dt + '! You win!'; }
+      else if (dt > pt) { st = 'lose'; msg = dt + ' beats ' + pt + '. Dealer wins.'; }
+      else { st = 'push'; msg = 'Push - tie game.'; }
+      
+      const response = {
+        playerCards: ph.map(fmt),
+        dealerCards: dh.map(fmt),
+        playerTotal: pb ? 'BJ' : pt,
+        dealerTotal: db ? 'BJ' : dt,
+        playerStatus: pb ? 'bj' : 'stood',
+        status: st,
+        message: msg,
+        nextHint: 'Say "new_game"',
+        game: { deck, deckIndex: di, playerHand: ph, dealerHand: dh, playerStatus: 'stood' }
+      };
+      
+      return JSON.stringify({ result: fmtResponse(response), webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(response)), aspectRatio: 1.6 } });
+      
     } else {
-      overallMessage = handsInfo.length > 1
-        ? 'Hand ' + (S.activeHand + 1) + ' of ' + handsInfo.length
-        : 'Your turn';
+      return JSON.stringify({ error: 'Use "new_game", "hit", or "stand".' });
     }
-    
-    // Encode state to URL-safe base64
-    function encodeState(obj) {
-      return btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    }
-    
-    const responseData = {
-      hands: handsInfo,
-      dealer: { cards: dealerCards, total: dealerTotal },
-      session: { wins: S.sessionWins, losses: S.sessionLosses, pushes: S.sessionPushes },
-      gameOver: S.gameOver,
-      status: overallStatus,
-      message: overallMessage,
-      canSplit: canSplit(safeAccess(S.playerHands, S.activeHand)) && !S.gameOver && S.playerHands.length < 3,
-      nextHint: S.gameOver ? 'Say "new_game" to play again.' : 'Say "hit", "stand", or "split".',
-      _encoded: encodeState(S)
-    };
-    
-    // Text with embedded state for LLM to extract
-    let text = '🃏 Blackjack\n';
-    text += 'Session: ' + S.sessionWins + 'W / ' + S.sessionLosses + 'L / ' + S.sessionPushes + 'P\n\n';
-    for (const h of handsInfo) {
-      text += 'Hand ' + (h.index+1) + ': ' + h.cards.join(' ') + ' (' + h.total + ') - ' + h.message + '\n';
-    }
-    text += 'Dealer: ' + dealerCards.join(' ') + ' (' + dealerTotal + ')\n';
-    text += overallMessage;
-    if (responseData.canSplit) text += '\n\n💡 Tip: You can "split"!';
-    text += '\n\n' + responseData.nextHint;
-    // Include encoded state for LLM to pass back
-    text += '\n\n[STATE:' + responseData._encoded + ']';
-    
-    const webviewURL = 'webview.html?s=' + encodeState(S);
-    
-    return JSON.stringify({
-      result: text,
-      webview: { url: webviewURL, aspectRatio: 1.6 }
-    });
     
   } catch (e) {
     return JSON.stringify({ error: 'Error: ' + e.message });
