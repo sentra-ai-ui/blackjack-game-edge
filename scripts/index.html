@@ -3,54 +3,55 @@
 <head></head>
 <body>
 <script>
-// Stateless - just shuffle and deal. LLM tracks the game.
-function seededRandom(seed) {
-  return function() {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-}
-
+// 6-deck shoe, auto-shuffle, auto-deal on start
 window['ai_edge_gallery_get_result'] = async (data) => {
   try {
     const jsonData = JSON.parse(data);
     const action = jsonData.action;
+    
+    // 6-deck shoe = 312 cards
+    const SHOE_SIZE = 312;
+    const DEEP_SHUFFLE = 52; // Reshuffle when <52 cards remaining
+    
     const seed = parseInt(jsonData.seed) || Math.floor(Math.random() * 2147483647);
-    const rng = seededRandom(seed);
+    const rng = (function(s) {
+      return function() {
+        s = (s * 1103515245 + 12345) & 0x7fffffff;
+        return s / 0x7fffffff;
+      };
+    })(seed);
     
     const SUITS = ['♥', '♦', '♣', '♠'];
     const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
     
-    // Fisher-Yates shuffle
-    function shuffle(n) {
-      const arr = [];
-      for (let i = 0; i < n; i++) arr.push(i);
-      for (let i = n - 1; i > 0; i--) {
+    function fisherYatesShuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(rng() * (i + 1));
         [arr[i], arr[j]] = [arr[j], arr[i]];
       }
       return arr;
     }
     
-    // Create deck indices and shuffle
-    const indices = shuffle(52);
-    
-    // Card value and display
-    function cardValue(idx) {
-      const r = idx % 13;
-      if (r === 0) return 11; // Ace
-      if (r >= 10) return 10; // J, Q, K
-      return r + 1;
+    function createShoe() {
+      // 6 decks
+      const shoe = [];
+      for (let d = 0; d < 6; d++) {
+        for (let i = 0; i < 52; i++) shoe.push(i);
+      }
+      return fisherYatesShuffle(shoe);
     }
     
     function cardDisplay(idx) {
       const r = idx % 13;
-      const s = Math.floor(idx / 13);
+      const s = Math.floor(idx / 13) % 4;
       return RANKS[r] + SUITS[s];
     }
     
-    function cardSuit(idx) {
-      return SUITS[Math.floor(idx / 13)];
+    function cardValue(idx) {
+      const r = idx % 13;
+      if (r === 0) return 11;
+      if (r >= 10) return 10;
+      return r + 1;
     }
     
     function handTotal(indices) {
@@ -67,107 +68,187 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       return indices.length === 2 && handTotal(indices) === 21;
     }
     
-    // Deal n cards from deck
-    const startIdx = (jsonData.deckPos || 0) % 52;
-    function deal(n) {
-      const cards = [];
-      for (let i = 0; i < n; i++) {
-        const pos = (startIdx + i) % 52;
-        cards.push(indices[pos]);
+    // Get or create shoe
+    let shoe = jsonData.shoe;
+    let shoePos = parseInt(jsonData.shoePos) || 0;
+    
+    function ensureShoe() {
+      if (!shoe || shoe.length !== SHOE_SIZE) {
+        shoe = createShoe();
+        shoePos = 0;
       }
-      return cards;
+      // Auto-reshuffle if running low
+      if (shoePos >= SHOE_SIZE - DEEP_SHUFFLE) {
+        shoe = createShoe();
+        shoePos = 0;
+      }
     }
     
-    const deckPos = ((jsonData.deckPos || 0) + (jsonData.count || 0)) % 52;
+    function dealCard() {
+      ensureShoe();
+      const card = shoe[shoePos];
+      shoePos++;
+      return card;
+    }
     
-    if (action === 'shuffle') {
-      // Return shuffled deck indices (hidden) - LLM uses these
-      return JSON.stringify({
-        result: 'Deck shuffled. Use seed=' + seed + ' and deckPos=0 for dealing.',
-        seed: seed,
-        deckPos: 0,
-        // Deck is implicitly shuffled via the rng - LLM tracks everything
-      });
+    function cardsRemaining() {
+      ensureShoe();
+      return SHOE_SIZE - shoePos;
+    }
+    
+    // Check if this is a fresh start
+    const isNewGame = !jsonData.playerHand || jsonData.playerHand.length === 0;
+    
+    let playerHand = jsonData.playerHand || [];
+    let dealerHand = jsonData.dealerHand || [];
+    let gamePhase = jsonData.gamePhase || 'betting'; // betting, playing, dealer, ended
+    let message = jsonData.message || '';
+    let outcome = jsonData.outcome || '';
+    
+    let result = {};
+    result.seed = seed;
+    result.shoe = shoe;
+    result.shoePos = shoePos;
+    result.playerHand = playerHand;
+    result.dealerHand = dealerHand;
+    result.gamePhase = gamePhase;
+    result.message = message;
+    result.outcome = outcome;
+    result.cardsRemaining = cardsRemaining();
+    
+    // Actions
+    if (action === 'start' || action === 'new_game' || action === 'deal') {
+      // Fresh deal - auto if just starting
+      ensureShoe();
+      playerHand = [dealCard(), dealCard()];
+      dealerHand = [dealCard(), dealCard()];
+      shoePos = result.shoePos; // capture updated position
       
-    } else if (action === 'deal') {
-      // Deal cards from current position
-      const count = parseInt(jsonData.count) || 2;
-      const cards = deal(count);
-      const deckPosNew = (deckPos + count) % 52;
+      const pt = handTotal(playerHand);
+      const pb = isBlackjack(playerHand);
+      const db = isBlackjack(dealerHand);
       
-      return JSON.stringify({
-        result: 'Dealt: ' + cards.map(cardDisplay).join(', ') + ' (deckPos=' + deckPosNew + ')',
-        cards: cards.map(cardDisplay),
-        cardIndices: cards,
-        seed: seed,
-        deckPos: deckPosNew
-      });
+      gamePhase = 'playing';
       
-    } else if (action === 'evaluate') {
-      // Evaluate a hand
-      const handIndices = jsonData.hand || [];
-      const total = handTotal(handIndices);
-      const display = handIndices.map(cardDisplay).join(' ');
-      const isBJ = isBlackjack(handIndices);
-      
-      return JSON.stringify({
-        result: display + ' = ' + (isBJ ? 'BLACKJACK!' : total),
-        total: total,
-        blackjack: isBJ,
-        display: display,
-        bust: total > 21
-      });
-      
-    } else if (action === 'dealer_play') {
-      // Dealer plays to 17+
-      let dealerCards = jsonData.dealerHand || [];
-      const playerTotal = jsonData.playerTotal || 0;
-      
-      // Continue from where we left off
-      const currentCount = dealerCards.length;
-      while (handTotal(dealerCards) < 17 && dealerCards.length < 10) {
-        const pos = (deckPos + dealerCards.length - currentCount) % 52;
-        dealerCards.push(indices[pos]);
-      }
-      
-      const dt = handTotal(dealerCards);
-      const db = isBlackjack(dealerCards);
-      
-      let outcome, message;
-      if (dt > 21) {
-        outcome = 'dealer_bust';
-        message = 'Dealer busts with ' + dt + '! You win!';
+      if (pb && db) {
+        outcome = 'push';
+        message = 'Both Blackjack! Push.';
+        gamePhase = 'ended';
+      } else if (pb) {
+        outcome = 'player_bj';
+        message = 'Blackjack! You win!';
+        gamePhase = 'ended';
       } else if (db) {
         outcome = 'dealer_bj';
-        message = 'Dealer has Blackjack!';
-      } else if (dt >= 17) {
-        if (dt > playerTotal) {
-          outcome = 'lose';
-          message = 'Dealer has ' + dt + '. You lose.';
-        } else if (dt < playerTotal) {
-          outcome = 'win';
-          message = 'You win with ' + playerTotal + ' vs ' + dt + '!';
-        } else {
-          outcome = 'push';
-          message = 'Push! Both have ' + dt + '.';
-        }
+        message = 'Dealer Blackjack!';
+        gamePhase = 'ended';
+      } else {
+        message = 'Your turn. "hit" or "stand"?';
       }
       
-      return JSON.stringify({
-        result: 'Dealer: ' + dealerCards.map(cardDisplay).join(' ') + ' = ' + dt,
-        dealerHand: dealerCards,
-        dealerTotal: dt,
-        dealerBlackjack: db,
-        dealerBust: dt > 21,
-        outcome: outcome,
-        message: message,
-        seed: seed,
-        deckPos: (deckPos + dealerCards.length) % 52
-      });
+    } else if (action === 'hit') {
+      if (gamePhase !== 'playing') {
+        return JSON.stringify({ error: 'Game not in progress. Say "start" or "new_game".' });
+      }
+      
+      playerHand.push(dealCard());
+      shoePos = result.shoePos;
+      const pt = handTotal(playerHand);
+      
+      if (pt > 21) {
+        outcome = 'bust';
+        message = 'Bust! ' + playerHand.map(cardDisplay).join(' ') + ' = ' + pt;
+        gamePhase = 'ended';
+      } else if (pt === 21) {
+        // Auto-stand
+        while (handTotal(dealerHand) < 17) dealerHand.push(dealCard());
+        shoePos = result.shoePos;
+        const dt = handTotal(dealerHand);
+        const db = isBlackjack(dealerHand);
+        if (dt > 21) { outcome = 'win'; message = 'Dealer busts! You win!'; }
+        else if (dt > pt) { outcome = 'lose'; message = 'Dealer has ' + dt + '. You lose.'; }
+        else if (dt < pt) { outcome = 'win'; message = 'You have 21! You win!'; }
+        else { outcome = 'push'; message = 'Push!'; }
+        gamePhase = 'ended';
+      } else {
+        message = playerHand.map(cardDisplay).join(' ') + ' = ' + pt + '. Hit or stand?';
+      }
+      
+    } else if (action === 'stand') {
+      if (gamePhase !== 'playing') {
+        return JSON.stringify({ error: 'Game not in progress. Say "start" or "new_game".' });
+      }
+      
+      while (handTotal(dealerHand) < 17) dealerHand.push(dealCard());
+      shoePos = result.shoePos;
+      
+      const pt = handTotal(playerHand);
+      const dt = handTotal(dealerHand);
+      const pb = isBlackjack(playerHand);
+      const db = isBlackjack(dealerHand);
+      
+      if (dt > 21) { outcome = 'win'; message = 'Dealer busts with ' + dt + '! You win!'; }
+      else if (pb && db) { outcome = 'push'; message = 'Both Blackjack. Push.'; }
+      else if (db) { outcome = 'lose'; message = 'Dealer Blackjack!'; }
+      else if (pb) { outcome = 'player_bj'; message = 'Blackjack! You win!'; }
+      else if (pt > dt) { outcome = 'win'; message = pt + ' beats ' + dt + '! You win!'; }
+      else if (dt > pt) { outcome = 'lose'; message = 'Dealer has ' + dt + '. You lose.'; }
+      else { outcome = 'push'; message = 'Push! Both have ' + pt + '.'; }
+      
+      gamePhase = 'ended';
       
     } else {
-      return JSON.stringify({ error: 'Use: shuffle, deal, evaluate, or dealer_play' });
+      return JSON.stringify({ error: 'Use: start/new_game/deal, hit, or stand.' });
     }
+    
+    // Update result object
+    result.shoePos = shoePos;
+    result.playerHand = playerHand;
+    result.dealerHand = dealerHand;
+    result.gamePhase = gamePhase;
+    result.message = message;
+    result.outcome = outcome;
+    result.cardsRemaining = cardsRemaining();
+    
+    // Build display
+    const playerCards = playerHand.map(cardDisplay).join(' ');
+    const dealerCards = dealerHand.map(cardDisplay).join(' ');
+    const playerTotal = isBlackjack(playerHand) ? 'BJ' : handTotal(playerHand);
+    const dealerTotal = gamePhase === 'playing' ? '?' : (isBlackjack(dealerHand) ? 'BJ' : handTotal(dealerHand));
+    const dealerVisible = gamePhase === 'playing' 
+      ? cardDisplay(dealerHand[0]) + ' ??' 
+      : dealerCards;
+    
+    // Text output
+    let text = '🃏 Blackjack\n\n';
+    text += 'Dealer: ' + dealerVisible + ' (' + (gamePhase === 'playing' ? '?' : dealerTotal) + ')\n';
+    text += 'You: ' + playerCards + ' (' + playerTotal + ')\n\n';
+    text += message + '\n';
+    if (gamePhase === 'ended') {
+      text += '\nCards left: ' + result.cardsRemaining + '\n';
+      text += '\nSay "start" or "new_game" to play again.';
+    } else {
+      text += '\nCards left: ' + result.cardsRemaining;
+    }
+    
+    // Webview state
+    const webviewState = {
+      playerCards: playerHand.map(cardDisplay),
+      playerTotal: playerTotal,
+      dealerCards: dealerHand.map(cardDisplay),
+      dealerTotal: gamePhase === 'playing' ? '?' : dealerTotal,
+      dealerHidden: gamePhase === 'playing',
+      message: message,
+      outcome: outcome,
+      gameOver: gamePhase === 'ended',
+      cardsRemaining: result.cardsRemaining,
+      nextHint: gamePhase === 'ended' ? 'Say "start"' : 'Say "hit" or "stand"'
+    };
+    
+    return JSON.stringify({
+      result: text,
+      webview: { url: 'webview.html?state=' + encodeURIComponent(JSON.stringify(webviewState)), aspectRatio: 1.6 }
+    });
     
   } catch (e) {
     return JSON.stringify({ error: 'Error: ' + e.message });

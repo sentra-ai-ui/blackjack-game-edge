@@ -7,59 +7,42 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d4f1c; color: white; min-height: 100vh; padding: 10px; }
-    .table { background: linear-gradient(135deg, #1a5c2e 0%, #0d4f1c 100%); border-radius: 14px; padding: 14px; max-width: 420px; margin: 0 auto; box-shadow: 0 10px 35px rgba(0,0,0,0.4); }
-    .score { display: flex; justify-content: center; gap: 12px; margin-bottom: 10px; font-size: 12px; }
-    .score span { background: rgba(0,0,0,0.25); padding: 4px 10px; border-radius: 16px; }
-    .score .w { color: #4CAF50; font-weight: bold; }
-    .score .l { color: #f44336; font-weight: bold; }
-    .score .p { color: #ff9800; font-weight: bold; }
-    .label { font-size: 10px; color: #ffd700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
-    .hand-box { margin-bottom: 10px; }
-    .hand-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
-    .hand-name { font-size: 11px; color: #ccc; }
-    .hand-badge { font-size: 9px; background: #2196F3; padding: 2px 7px; border-radius: 8px; }
-    .hand-badge.bust { background: #9c27b0; }
-    .hand-badge.bj { background: #ffd700; color: #1a1a1a; }
-    .hand-badge.win { background: #4CAF50; }
-    .hand-badge.lose { background: #f44336; }
-    .cards { display: flex; gap: 5px; flex-wrap: wrap; min-height: 55px; margin-bottom: 4px; }
-    .card { display: flex; align-items: center; justify-content: center; padding: 7px 10px; background: white; color: #1a1a1a; border-radius: 6px; font-weight: bold; font-size: 15px; min-width: 38px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+    .table { background: linear-gradient(135deg, #1a5c2e 0%, #0d4f1c 100%); border-radius: 14px; padding: 14px; max-width: 400px; margin: 0 auto; box-shadow: 0 10px 35px rgba(0,0,0,0.4); }
+    .label { font-size: 10px; color: #ffd700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .hand { display: flex; gap: 6px; flex-wrap: wrap; min-height: 60px; margin-bottom: 10px; }
+    .card { display: flex; align-items: center; justify-content: center; padding: 8px 10px; background: white; color: #1a1a1a; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 42px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
     .card.red { color: #c41e3a; }
     .card.hidden { background: linear-gradient(135deg, #1e3a5f, #0d1f33); color: #ffd700; font-size: 18px; border: 2px solid #3a6ea5; }
-    .total { font-size: 12px; color: #aaa; }
+    .total { font-size: 13px; background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: 6px; display: inline-block; }
     .total span { color: #ffd700; font-weight: bold; }
-    .sep { height: 1px; background: rgba(255,255,255,0.1); margin: 10px 0; }
-    .result-bar { text-align: center; font-size: 13px; font-weight: bold; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
-    .result-bar.win     { background: linear-gradient(135deg, #4CAF50, #2E7D32); }
-    .result-bar.lose    { background: linear-gradient(135deg, #f44336, #c62828); }
-    .result-bar.push    { background: linear-gradient(135deg, #ff9800, #f57c00); }
-    .result-bar.playing { background: rgba(0,0,0,0.2); }
-    .hint { text-align: center; font-size: 11px; color: #888; margin-top: 8px; }
-    .tip { text-align: center; font-size: 11px; color: #4CAF50; margin-top: 4px; }
+    .sep { height: 1px; background: rgba(255,255,255,0.1); margin: 12px 0; }
+    .message { text-align: center; font-size: 15px; font-weight: bold; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
+    .message.win { background: linear-gradient(135deg, #4CAF50, #2E7D32); }
+    .message.lose { background: linear-gradient(135deg, #f44336, #c62828); }
+    .message.push { background: linear-gradient(135deg, #ff9800, #f57c00); }
+    .message.bj { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #1a1a1a; }
+    .message.bust { background: linear-gradient(135deg, #9c27b0, #6a1b9a); }
+    .message.playing { background: rgba(0,0,0,0.2); }
+    .footer { text-align: center; font-size: 11px; color: #888; margin-top: 8px; }
+    .cards-left { font-size: 11px; color: #aaa; text-align: center; margin-top: 6px; }
   </style>
 </head>
 <body>
   <div class="table">
-    <div class="score">
-      <span class="w">W: <span id="wins">0</span></span>
-      <span class="l">L: <span id="losses">0</span></span>
-      <span class="p">P: <span id="pushes">0</span></span>
-    </div>
+    <div class="label">Dealer</div>
+    <div id="dealer-hand" class="hand"></div>
+    <div class="total">Total: <span id="dealer-total">?</span></div>
     
     <div class="sep"></div>
     
-    <div class="hand-box">
-      <div class="label">Dealer</div>
-      <div id="dealer-cards" class="cards"></div>
-      <div class="total">Total: <span id="dealer-total">?</span></div>
-    </div>
+    <div class="label">Your Hand</div>
+    <div id="player-hand" class="hand"></div>
+    <div class="total">Total: <span id="player-total">0</span></div>
     
-    <div id="hands-container"></div>
+    <div id="message" class="message playing">Loading...</div>
     
-    <div id="result-bar" class="result-bar playing">Your turn</div>
-    
-    <div id="hint" class="hint">Type an action below</div>
-    <div id="tip" class="tip" style="display:none;"></div>
+    <div class="cards-left">Cards remaining: <span id="cards-left">312</span></div>
+    <div class="footer">Say "hit" or "stand"</div>
   </div>
 
   <script>
@@ -74,66 +57,47 @@
     
     function render(state) {
       if (!state) {
-        document.getElementById('result-bar').textContent = 'Loading game...';
+        document.getElementById('message').textContent = 'Say "start" to begin';
         return;
       }
       
-      // Session score
-      document.getElementById('wins').textContent = state.session.wins;
-      document.getElementById('losses').textContent = state.session.losses;
-      document.getElementById('pushes').textContent = state.session.pushes;
-      
-      // Dealer
-      const dealerHTML = state.dealer.cards.map(c => {
-        if (c === '??') return '<div class="card hidden">?</div>';
+      // Player cards
+      document.getElementById('player-hand').innerHTML = state.playerCards.map(c => {
         const isRed = c.includes('♥') || c.includes('♦');
-        return '<div class="card' + (isRed ? ' red' : '') + '">' + c.replace(/[♥♦♣♠]/g, '') + ' ' + c.match(/[♥♦♣♠]/g)[0] + '</div>';
-      });
-      document.getElementById('dealer-cards').innerHTML = dealerHTML.join('');
-      document.getElementById('dealer-total').textContent = state.dealer.total;
+        return '<div class="card' + (isRed ? ' red' : '') + '">' + c + '</div>';
+      }).join('');
+      document.getElementById('player-total').textContent = state.playerTotal;
       
-      // Player hands
-      const container = document.getElementById('hands-container');
-      container.innerHTML = '';
-      state.hands.forEach((h, i) => {
-        const badgeClass = h.status === 'bust' ? 'bust' : h.status === 'bj' ? 'bj' : h.status === 'win' ? 'win' : h.status === 'lose' ? 'lose' : h.status === 'active' ? '' : '';
-        const badgeText = h.status === 'bust' ? 'BUST' : h.status === 'bj' ? 'BJ!' : h.status === 'active' ? 'YOUR TURN' : h.status === 'win' ? 'WINS' : h.status === 'lose' ? 'LOSES' : '';
-        
-        const cardsHTML = h.cards.map(c => {
-          const isRed = c.includes('♥') || c.includes('♦');
-          return '<div class="card' + (isRed ? ' red' : '') + '">' + c.replace(/[♥♦♣♠]/g, (m) => '<span style="font-size:11px">' + m + '</span>') + '</div>';
-        }).join('');
-        
-        container.innerHTML += 
-          '<div class="hand-box">' +
-            '<div class="hand-header">' +
-              '<div class="hand-name">Hand ' + (i+1) + (state.hands.length > 1 ? ' of ' + state.hands.length : '') + '</div>' +
-              (badgeText ? '<div class="hand-badge ' + badgeClass + '">' + badgeText + '</div>' : '') +
-            '</div>' +
-            '<div class="cards">' + cardsHTML + '</div>' +
-            '<div class="total">Total: <span>' + h.total + '</span></div>' +
-          '</div>';
-      });
-      
-      // Result bar
-      const bar = document.getElementById('result-bar');
-      bar.textContent = state.message;
-      bar.className = 'result-bar ' + state.status;
-      
-      // Hint
-      document.getElementById('hint').textContent = state.nextHint;
-      
-      // Tip for split
-      const tip = document.getElementById('tip');
-      if (state.canSplit) {
-        tip.textContent = '💡 Say "split" to split your cards!';
-        tip.style.display = 'block';
+      // Dealer cards
+      if (state.dealerHidden && state.dealerCards.length > 0) {
+        document.getElementById('dealer-hand').innerHTML = 
+          '<div class="card hidden">?</div>';
+        document.getElementById('dealer-total').textContent = '?';
       } else {
-        tip.style.display = 'none';
+        document.getElementById('dealer-hand').innerHTML = state.dealerCards.map(c => {
+          const isRed = c.includes('♥') || c.includes('♦');
+          return '<div class="card' + (isRed ? ' red' : '') + '">' + c + '</div>';
+        }).join('');
+        document.getElementById('dealer-total').textContent = state.dealerTotal;
       }
+      
+      // Message
+      const msgEl = document.getElementById('message');
+      msgEl.textContent = state.message;
+      const outcome = state.outcome || '';
+      if (outcome === 'win' || outcome === 'player_bj') msgEl.className = 'message win';
+      else if (outcome === 'lose' || outcome === 'dealer_bj') msgEl.className = 'message lose';
+      else if (outcome === 'bust') msgEl.className = 'message bust';
+      else if (outcome === 'push') msgEl.className = 'message push';
+      else msgEl.className = 'message playing';
+      
+      // Cards remaining
+      document.getElementById('cards-left').textContent = state.cardsRemaining || 312;
+      
+      // Footer
+      document.querySelector('.footer').textContent = state.nextHint || '';
     }
     
-    // Initial render
     render(getState());
   </script>
 </body>
