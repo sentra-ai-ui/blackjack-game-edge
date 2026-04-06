@@ -72,8 +72,9 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     let shoe = jsonData.shoe;
     let shoePos = parseInt(jsonData.shoePos) || 0;
     
-    function ensureShoe() {
-      if (!shoe || shoe.length !== SHOE_SIZE) {
+    function ensureShoe(forceNew = false) {
+      // Always re-shuffle on new game
+      if (forceNew || !shoe || shoe.length !== SHOE_SIZE) {
         shoe = createShoe();
         shoePos = 0;
       }
@@ -118,8 +119,8 @@ window['ai_edge_gallery_get_result'] = async (data) => {
     
     // Actions
     if (action === 'start' || action === 'new_game' || action === 'deal') {
-      // Fresh deal - auto if just starting
-      ensureShoe();
+      // Fresh deal - always reshuffle on new game
+      ensureShoe(true);
       playerHand = [dealCard(), dealCard()];
       dealerHand = [dealCard(), dealCard()];
       shoePos = result.shoePos; // capture updated position
@@ -147,6 +148,7 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       }
       
     } else if (action === 'hit') {
+      ensureShoe(); // Ensure shoe exists even for mid-game hits
       if (gamePhase !== 'playing') {
         return JSON.stringify({ error: 'Game not in progress. Say "start" or "new_game".' });
       }
@@ -178,6 +180,8 @@ window['ai_edge_gallery_get_result'] = async (data) => {
       if (gamePhase !== 'playing') {
         return JSON.stringify({ error: 'Game not in progress. Say "start" or "new_game".' });
       }
+      
+      ensureShoe(); // Ensure shoe for dealer draw
       
       while (handTotal(dealerHand) < 17) dealerHand.push(dealCard());
       shoePos = result.shoePos;
